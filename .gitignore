@@ -3,6 +3,7 @@
 .dirstamp
 .deps
 .DS_Store
+*.aps
 /*.pdb
 /*.ilk
 /*.res
