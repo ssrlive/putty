@@ -1,57 +1,81 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <ItemGroup>
-  </ItemGroup>
-  <ItemGroup>
-  </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\conf.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\..\misc.c">
+    </ClCompile>
+    <ClCompile Include="..\..\..\misc.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\..\sshbn.c">
+    </ClCompile>
+    <ClCompile Include="..\..\..\sshbn.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\..\testbn.c">
+    </ClCompile>
+    <ClCompile Include="..\..\..\testbn.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\..\tree234.c">
+    </ClCompile>
+    <ClCompile Include="..\..\..\tree234.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\..\version.c">
+    </ClCompile>
+    <ClCompile Include="..\..\..\version.c">
       <Filter>Source Files</Filter>
-    </ClCompile>    <ClCompile Include="..\..\winmisc.c">
+    </ClCompile>
+    <ClCompile Include="..\..\winmisc.c">
       <Filter>Source Files</Filter>
-    </ClCompile>  </ItemGroup>
+    </ClCompile>
+    <ClCompile Include="..\..\..\marshal.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\empty.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\empty.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\int64.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\misc.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\misc.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\network.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\network.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\putty.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\putty.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\puttymem.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\puttymem.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\puttyps.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\puttyps.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\ssh.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\ssh.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\sshbn.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\sshbn.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\tree234.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\tree234.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\unix\unix.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\unix\unix.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\..\version.h">
+    </ClInclude>
+    <ClInclude Include="..\..\..\version.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\winhelp.h">
+    </ClInclude>
+    <ClInclude Include="..\..\winhelp.h">
       <Filter>Header Files</Filter>
-    </ClInclude>    <ClInclude Include="..\..\winstuff.h">
+    </ClInclude>
+    <ClInclude Include="..\..\winstuff.h">
       <Filter>Header Files</Filter>
-    </ClInclude>  </ItemGroup>
+    </ClInclude>
+    <ClInclude Include="..\..\..\marshal.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
       <UniqueIdentifier>{ac51b4ef-5625-4afb-bb99-ec5926f4ea5a}</UniqueIdentifier>

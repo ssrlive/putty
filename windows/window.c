@@ -5211,11 +5211,12 @@ void write_clip(void *frontend, int clipboard,
 		}
 
 		if (attr[tindex] & ATTR_REVERSE) {
+            COLORREF tmpref;
 		    int tmpcolour = fgcolour;	    /* Swap foreground and background */
 		    fgcolour = bgcolour;
 		    bgcolour = tmpcolour;
 
-		    COLORREF tmpref = fg;
+		    tmpref = fg;
 		    fg = bg;
 		    bg = tmpref;
 		}
@@ -5478,9 +5479,11 @@ void frontend_request_paste(void *frontend, int clipboard)
      * message back to our main window when it terminates, and
      * that tells us it's OK to paste.
      */
+    {
     DWORD in_threadid; /* required for Win9x */
     CreateThread(NULL, 0, clipboard_read_threadfunc,
 		 hwnd, 0, &in_threadid);
+    }
 }
 
 #if 0

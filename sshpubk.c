@@ -1524,9 +1524,10 @@ char *ssh2_fingerprint_blob(const void *blob, int bloblen)
 
 char *ssh2_fingerprint(ssh_key *data)
 {
+    char *ret;
     strbuf *blob = strbuf_new();
     ssh_key_public_blob(data, BinarySink_UPCAST(blob));
-    char *ret = ssh2_fingerprint_blob(blob->s, blob->len);
+    ret = ssh2_fingerprint_blob(blob->s, blob->len);
     strbuf_free(blob);
     return ret;
 }
