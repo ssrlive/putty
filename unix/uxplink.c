@@ -402,7 +402,7 @@ int try_output(int is_stderr)
 }
 
 int from_backend(void *frontend_handle, int is_stderr,
-		 const char *data, int len)
+                 const void *data, int len)
 {
     if (is_stderr) {
 	bufchain_add(&stderr_data, data, len);
@@ -414,7 +414,7 @@ int from_backend(void *frontend_handle, int is_stderr,
     }
 }
 
-int from_backend_untrusted(void *frontend_handle, const char *data, int len)
+int from_backend_untrusted(void *frontend_handle, const void *data, int len)
 {
     /*
      * No "untrusted" output should get here (the way the code is
@@ -432,12 +432,12 @@ int from_backend_eof(void *frontend_handle)
     return FALSE;   /* do not respond to incoming EOF with outgoing */
 }
 
-int get_userpass_input(prompts_t *p, const unsigned char *in, int inlen)
+int get_userpass_input(prompts_t *p, bufchain *input)
 {
     int ret;
-    ret = cmdline_get_passwd_input(p, in, inlen);
+    ret = cmdline_get_passwd_input(p);
     if (ret == -1)
-	ret = console_get_userpass_input(p, in, inlen);
+	ret = console_get_userpass_input(p);
     return ret;
 }
 

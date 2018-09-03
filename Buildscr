@@ -88,6 +88,8 @@ ifneq "$(SNAPSHOT)" "" set Isuffix $(Date)-installer
 ifeq "$(RELEASE)$(PRERELEASE)$(SNAPSHOT)" "" set Isuffix custom-$(Date)-installer
 set Ifilename32 putty-$(Isuffix)
 set Ifilename64 putty-64bit-$(Isuffix)
+set Ifilenamea32 putty-arm32-$(Isuffix)
+set Ifilenamea64 putty-arm64-$(Isuffix)
 
 # Set up the version string for the Windows installer.
 ifneq "$(RELEASE)" "" set Iversion $(RELEASE)
@@ -139,7 +141,7 @@ ifneq "$(MAKEARGS)" "" set Makeargs $(Makeargs) $(MAKEARGS)
 in putty do ./mksrcarc.sh
 in putty do ./mkunxarc.sh '$(Autoconfver)' '$(Uxarcsuffix)' $(Docmakever)
 in putty do perl mkfiles.pl
-in putty/doc do make $(Docmakever) putty.hlp putty.chm
+in putty/doc do make $(Docmakever) putty.hlp putty.chm -j$(nproc)
 
 # Munge the installer script locally so that it reports the version
 # we're really building.
@@ -152,7 +154,7 @@ in putty/windows do perl -i~ -pe 'BEGIN{$$a=shift@ARGV;}s/^(VersionInfoVersion=)
 in putty do perl -i~ -pe 'y/\015//d;s/$$/\015/' LICENCE
 
 # Some gratuitous theming for the MSI installer UI.
-in putty/icons do make
+in putty/icons do make -j$(nproc)
 in putty do convert -size 164x312 'gradient:blue-white' -distort SRT -90 -swirl 180 \( -size 329x312 canvas:white \) +append \( icons/putty-48.png -geometry +28+24 \) -composite \( icons/pscp-48.png -geometry +88+96 \) -composite \( icons/puttygen-48.png -geometry +28+168 \) -composite \( icons/pageant-48.png -geometry +88+240 \) -composite windows/msidialog.bmp
 in putty do convert -size 493x58 canvas:white \( icons/putty-48.png -geometry +440+5 \) -composite windows/msibanner.bmp
 
@@ -160,8 +162,12 @@ in putty do convert -size 493x58 canvas:white \( icons/putty-48.png -geometry +4
 #
 # For the 32-bit ones, we set a subsystem version of 5.01, which
 # allows the resulting files to still run on Windows XP.
-in putty/windows with clangcl32 do mkdir build32 && Platform=x86 make -f Makefile.clangcl BUILDDIR=build32/ SUBSYSVER=,5.01 $(Makeargs) all cleantestprogs
-in putty/windows with clangcl64 do mkdir build64 && Platform=x64 make -f Makefile.clangcl BUILDDIR=build64/ $(Makeargs) all cleantestprogs
+in putty/windows with clangcl32 do mkdir build32 && Platform=x86 make -f Makefile.clangcl BUILDDIR=build32/ SUBSYSVER=,5.01 $(Makeargs) all -j$(nproc)
+in putty/windows with clangcl64 do mkdir build64 && Platform=x64 make -f Makefile.clangcl BUILDDIR=build64/ $(Makeargs) all -j$(nproc)
+
+# Build experimental Arm Windows binaries.
+in putty/windows with clangcl_a32 do mkdir abuild32 && Platform=arm make -f Makefile.clangcl BUILDDIR=abuild32/ SUBSYSVER=,5.01 $(Makeargs) all -j$(nproc)
+in putty/windows with clangcl_a64 do mkdir abuild64 && Platform=arm64 make -f Makefile.clangcl BUILDDIR=abuild64/ $(Makeargs) all -j$(nproc)
 
 # Build the 'old' binaries, which should still run on all 32-bit
 # versions of Windows back to Win95 (but not Win32s). These link
@@ -170,7 +176,16 @@ in putty/windows with clangcl64 do mkdir build64 && Platform=x64 make -f Makefil
 # a subsystem version of 4.0, and compile with /arch:IA32 to prevent
 # the use of modern CPU features like MMX which older machines also
 # might not have.
-in putty/windows with clangcl32_2003 do mkdir buildold && Platform=x86 make -f Makefile.clangcl BUILDDIR=buildold/ $(Makeargs) CCTARGET=i386-pc-windows-msvc13.0.0 SUBSYSVER=,4.0 EXTRA_windows=wincrt0.obj EXTRA_console=crt0.obj XFLAGS=/arch:IA32 all cleantestprogs
+in putty/windows with clangcl32_2003 do mkdir buildold && Platform=x86 make -f Makefile.clangcl BUILDDIR=buildold/ $(Makeargs) CCTARGET=i386-pc-windows-msvc13.0.0 SUBSYSVER=,4.0 EXTRA_windows=wincrt0.obj EXTRA_console=crt0.obj XFLAGS=/arch:IA32 all -j$(nproc)
+
+# Remove Windows binaries for the test programs we don't want to ship,
+# like testbn.exe. (But we still _built_ them, to ensure the build
+# worked.)
+in putty/windows do make -f Makefile.clangcl BUILDDIR=build32/ cleantestprogs
+in putty/windows do make -f Makefile.clangcl BUILDDIR=build64/ cleantestprogs
+in putty/windows do make -f Makefile.clangcl BUILDDIR=abuild32/ cleantestprogs
+in putty/windows do make -f Makefile.clangcl BUILDDIR=abuild64/ cleantestprogs
+in putty/windows do make -f Makefile.clangcl BUILDDIR=buildold/ cleantestprogs
 
 # Code-sign the Windows binaries, if the local bob config provides a
 # script to do so in a cross-compiling way. We assume here that the
@@ -179,20 +194,29 @@ in putty/windows with clangcl32_2003 do mkdir buildold && Platform=x86 make -f M
 # take the program name from an .exe's version resource, and that it
 # can accept multiple .exe or .msi filename arguments and sign them
 # all in place.
-ifneq "$(cross_winsigncode)" "" in putty/windows do $(cross_winsigncode) -N -i https://www.chiark.greenend.org.uk/~sgtatham/putty/ build*/*.exe
+ifneq "$(cross_winsigncode)" "" in putty/windows do $(cross_winsigncode) -N -i https://www.chiark.greenend.org.uk/~sgtatham/putty/ build*/*.exe abuild*/*.exe
 
 # Build a WiX MSI installer, for each of build32 and build64.
-in putty/windows with wixonlinux do candle -arch x86 -dWin64=no -dBuilddir=build32/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installer32.msi -spdb
-in putty/windows with wixonlinux do candle -arch x64 -dWin64=yes -dBuilddir=build64/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installer64.msi -spdb
+in putty/windows with wixonlinux do candle -arch x86 -dRealPlatform=x86 -dDllOk=yes -dBuilddir=build32/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installer32.msi -spdb
+in putty/windows with wixonlinux do candle -arch x64 -dRealPlatform=x64 -dDllOk=yes -dBuilddir=build64/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installer64.msi -spdb
+in putty/windows with wixonlinux do candle -arch x64 -dRealPlatform=Arm -dDllOk=no -dBuilddir=abuild32/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installera32.msi -spdb
+in putty/windows with wixonlinux do candle -arch x64 -dRealPlatform=Arm64 -dDllOk=no -dBuilddir=abuild64/ -dWinver="$(Winver)" -dPuttytextver="$(Puttytextver)" installer.wxs && light -ext WixUIExtension -ext WixUtilExtension -sval installer.wixobj -o installera64.msi -spdb
+
+# Bodge the platform fields for the Windows on Arm installers, since
+# WiX 3 doesn't understand Arm platform names itself.
+in putty/windows do ./msiplatform.py installera32.msi Arm
+in putty/windows do ./msiplatform.py installera64.msi Arm64
 
 # Sign the Windows installers.
-ifneq "$(cross_winsigncode)" "" in putty/windows do $(cross_winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/putty/ -n "PuTTY Installer" installer32.msi installer64.msi
+ifneq "$(cross_winsigncode)" "" in putty/windows do $(cross_winsigncode) -i https://www.chiark.greenend.org.uk/~sgtatham/putty/ -n "PuTTY Installer" installer32.msi installer64.msi installera32.msi installera64.msi
 
 in putty/doc do make mostlyclean
-in putty/doc do make $(Docmakever)
+in putty/doc do make $(Docmakever) -j$(nproc)
 in putty/windows/buildold do zip -k -j putty.zip `ls *.exe | grep -v puttytel` ../../doc/putty.chm ../../doc/putty.hlp ../../doc/putty.cnt
 in putty/windows/build32 do zip -k -j putty.zip `ls *.exe | grep -v puttytel` ../../doc/putty.chm ../../doc/putty.hlp ../../doc/putty.cnt
 in putty/windows/build64 do zip -k -j putty.zip `ls *.exe | grep -v puttytel` ../../doc/putty.chm ../../doc/putty.hlp ../../doc/putty.cnt
+in putty/windows/abuild32 do zip -k -j putty.zip `ls *.exe | grep -v puttytel` ../../doc/putty.chm ../../doc/putty.hlp ../../doc/putty.cnt
+in putty/windows/abuild64 do zip -k -j putty.zip `ls *.exe | grep -v puttytel` ../../doc/putty.chm ../../doc/putty.hlp ../../doc/putty.cnt
 in putty/doc do zip puttydoc.zip *.html
 
 # Deliver the actual PuTTY release directory into a subdir `putty'.
@@ -204,6 +228,12 @@ deliver putty/windows/build64/*.exe putty/w64/$@
 deliver putty/windows/build64/putty.zip putty/w64/$@
 deliver putty/windows/installer32.msi putty/w32/$(Ifilename32).msi
 deliver putty/windows/installer64.msi putty/w64/$(Ifilename64).msi
+deliver putty/windows/installera32.msi putty/wa32/$(Ifilenamea32).msi
+deliver putty/windows/installera64.msi putty/wa64/$(Ifilenamea64).msi
+deliver putty/windows/abuild32/*.exe putty/wa32/$@
+deliver putty/windows/abuild32/putty.zip putty/wa32/$@
+deliver putty/windows/abuild64/*.exe putty/wa64/$@
+deliver putty/windows/abuild64/putty.zip putty/wa64/$@
 deliver putty/doc/puttydoc.zip putty/$@
 deliver putty/doc/putty.chm putty/$@
 deliver putty/doc/putty.hlp putty/$@
@@ -217,6 +247,8 @@ deliver putty/*.tar.gz putty/$@
 deliver putty/windows/buildold/*.map maps/w32old/$@
 deliver putty/windows/build32/*.map maps/w32/$@
 deliver putty/windows/build64/*.map maps/w64/$@
+deliver putty/windows/abuild32/*.map maps/wa32/$@
+deliver putty/windows/abuild64/*.map maps/wa64/$@
 
 # Deliver sign.sh, so that whoever has just built PuTTY (the
 # snapshot scripts or me, depending) can conveniently sign it with
@@ -240,4 +272,4 @@ in-dest putty do echo "AddType application/octet-stream .hlp" >> .htaccess
 in-dest putty do echo "AddType application/octet-stream .cnt" >> .htaccess
 in-dest putty do set -- putty*.tar.gz; for k in '' .gpg; do echo RedirectMatch temp '(.*/)'putty.tar.gz$$k\$$ '$$1'"$$1$$k" >> .htaccess; done
 # And one in each binary directory, providing links for the installers.
-in-dest putty do for params in "w32 putty-installer" "w64 putty-64bit-installer"; do (set -- $$params; subdir=$$1; installername=$$2; cd $$subdir && for ext in msi exe; do set -- putty*installer.$$ext; if test -f $$1; then for k in '' .gpg; do echo RedirectMatch temp '(.*/)'$${installername}.$$ext$$k\$$ '$$1'"$$1$$k" >> .htaccess; done; fi; done); done
+in-dest putty do for params in "w32 putty-installer" "w64 putty-64bit-installer" "wa32 putty-arm32-installer" "wa64 putty-arm64-installer"; do (set -- $$params; subdir=$$1; installername=$$2; cd $$subdir && for ext in msi exe; do set -- putty*installer.$$ext; if test -f $$1; then for k in '' .gpg; do echo RedirectMatch temp '(.*/)'$${installername}.$$ext$$k\$$ '$$1'"$$1$$k" >> .htaccess; done; fi; done); done

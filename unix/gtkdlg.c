@@ -24,6 +24,7 @@
 #include <gdk/gdkx.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include "x11misc.h"
 #endif
 
 #ifdef TESTMODE
@@ -144,9 +145,6 @@ static void colourchoose_response(GtkDialog *dialog,
 #else
 static void coloursel_ok(GtkButton *button, gpointer data);
 static void coloursel_cancel(GtkButton *button, gpointer data);
-#endif
-#if !GTK_CHECK_VERSION(3,0,0)
-static void window_destroy(GtkWidget *widget, gpointer data);
 #endif
 static void dlgparam_destroy(GtkWidget *widget, gpointer data);
 int get_listitemheight(GtkWidget *widget);
@@ -1043,15 +1041,8 @@ void dlg_set_focus(union control *ctrl, void *dlg)
  */
 void dlg_beep(void *dlg)
 {
-    gdk_beep();
+    gdk_display_beep(gdk_display_get_default());
 }
-
-#if !GTK_CHECK_VERSION(3,0,0)
-static void errmsg_button_clicked(GtkButton *button, gpointer data)
-{
-    gtk_widget_destroy(GTK_WIDGET(data));
-}
-#endif
 
 static void set_transient_window_pos(GtkWidget *parent, GtkWidget *child)
 {
@@ -1462,7 +1453,7 @@ static void draglist_move(struct dlgparam *dp, struct uctrl *uc, int direction)
     if ((index < 0) ||
 	(index == 0 && direction < 0) ||
 	(index == g_list_length(children)-1 && direction > 0)) {
-	gdk_beep();
+	gdk_display_beep(gdk_display_get_default());
 	return;
     }
 
@@ -1786,9 +1777,12 @@ static void filefont_clicked(GtkButton *button, gpointer data)
             GdkFont *font = gdk_font_load(fontname);
             if (font) {
                 XFontStruct *xfs = GDK_FONT_XFONT(font);
-                Display *disp = GDK_FONT_XDISPLAY(font);
+                Display *disp = get_x11_display();
                 Atom fontprop = XInternAtom(disp, "FONT", False);
                 unsigned long ret;
+
+                assert(disp); /* this is GTK1! */
+
 		gdk_font_ref(font);
                 if (XGetFontProperty(xfs, fontprop, &ret)) {
                     char *name = XGetAtomName(disp, (Atom)ret);
@@ -2583,13 +2577,6 @@ static void treeitem_sel(GtkItem *item, gpointer data)
 
     sp->dp->shortcuts = &sp->shortcuts;
     sp->dp->currtreeitem = sp->treeitem;
-}
-#endif
-
-#if !GTK_CHECK_VERSION(3,0,0)
-static void window_destroy(GtkWidget *widget, gpointer data)
-{
-    gtk_main_quit();
 }
 #endif
 
@@ -3433,7 +3420,12 @@ GtkWidget *create_message_box(
     gtk_widget_show(window);
     gtk_window_set_focus(GTK_WINDOW(window), NULL);
 
+#if !GTK_CHECK_VERSION(2,0,0)
+    dp->currtreeitem = NULL;
+    dp->treeitems = NULL;
+#else
     dp->selparams = NULL;
+#endif
 
     g_signal_connect(G_OBJECT(window), "destroy",
                      G_CALLBACK(dlgparam_destroy), dp);
@@ -3787,14 +3779,18 @@ void about_box(void *window)
     gtk_window_set_focus(GTK_WINDOW(aboutbox), NULL);
 }
 
+#define LOGEVENT_INITIAL_MAX 128
+#define LOGEVENT_CIRCULAR_MAX 128
+
 struct eventlog_stuff {
     GtkWidget *parentwin, *window;
     struct controlbox *eventbox;
     struct Shortcuts scs;
     struct dlgparam dp;
     union control *listctrl;
-    char **events;
-    int nevents, negsize;
+    char **events_initial;
+    char **events_circular;
+    int ninitial, ncircular, circular_first;
     char *seldata;
     int sellen;
     int ignore_selchange;
@@ -3826,8 +3822,11 @@ static void eventlog_list_handler(union control *ctrl, void *dlg,
 
 	dlg_update_start(ctrl, dlg);
 	dlg_listbox_clear(ctrl, dlg);
-	for (i = 0; i < es->nevents; i++) {
-	    dlg_listbox_add(ctrl, dlg, es->events[i]);
+	for (i = 0; i < es->ninitial; i++) {
+	    dlg_listbox_add(ctrl, dlg, es->events_initial[i]);
+	}
+	for (i = 0; i < es->ncircular; i++) {
+	    dlg_listbox_add(ctrl, dlg, es->events_circular[(es->circular_first + i) % LOGEVENT_CIRCULAR_MAX]);
 	}
 	dlg_update_done(ctrl, dlg);
     } else if (event == EVENT_SELCHANGE) {
@@ -3849,16 +3848,31 @@ static void eventlog_list_handler(union control *ctrl, void *dlg,
         sfree(es->seldata);
         es->seldata = NULL;
         es->sellen = 0;
-        for (i = 0; i < es->nevents; i++) {
+        for (i = 0; i < es->ninitial; i++) {
             if (dlg_listbox_issel(ctrl, dlg, i)) {
-                int extralen = strlen(es->events[i]);
+                int extralen = strlen(es->events_initial[i]);
 
                 if (es->sellen + extralen + 2 > selsize) {
                     selsize = es->sellen + extralen + 512;
                     es->seldata = sresize(es->seldata, selsize, char);
                 }
 
-                strcpy(es->seldata + es->sellen, es->events[i]);
+                strcpy(es->seldata + es->sellen, es->events_initial[i]);
+                es->sellen += extralen;
+                es->seldata[es->sellen++] = '\n';
+            }
+        }
+        for (i = 0; i < es->ncircular; i++) {
+            if (dlg_listbox_issel(ctrl, dlg, es->ninitial + i)) {
+                int j = (es->circular_first + i) % LOGEVENT_CIRCULAR_MAX;
+                int extralen = strlen(es->events_circular[j]);
+
+                if (es->sellen + extralen + 2 > selsize) {
+                    selsize = es->sellen + extralen + 512;
+                    es->seldata = sresize(es->seldata, selsize, char);
+                }
+
+                strcpy(es->seldata + es->sellen, es->events_circular[j]);
                 es->sellen += extralen;
                 es->seldata[es->sellen++] = '\n';
             }
@@ -3955,7 +3969,7 @@ void showeventlog(void *estuff, void *parentwin)
     c->listbox.percentages[2] = 65;
 
     es->window = window = our_dialog_new();
-    title = dupcat(appname, " Event Log", NULL);
+    title = dupcat(appname, " Event Log", (const char *)NULL);
     gtk_window_set_title(GTK_WINDOW(window), title);
     sfree(title);
     w0 = layout_ctrls(&es->dp, &es->scs, s0, GTK_WINDOW(window));
@@ -4007,25 +4021,42 @@ void *eventlogstuff_new(void)
 void logevent_dlg(void *estuff, const char *string)
 {
     struct eventlog_stuff *es = (struct eventlog_stuff *)estuff;
-
     char timebuf[40];
     struct tm tm;
+    char **location;
+    size_t i;
 
-    if (es->nevents >= es->negsize) {
-	es->negsize += 64;
-	es->events = sresize(es->events, es->negsize, char *);
+    if (es->ninitial == 0) {
+        es->events_initial = sresize(es->events_initial, LOGEVENT_INITIAL_MAX, char *);
+        for (i = 0; i < LOGEVENT_INITIAL_MAX; i++)
+            es->events_initial[i] = NULL;
+        es->events_circular = sresize(es->events_circular, LOGEVENT_CIRCULAR_MAX, char *);
+        for (i = 0; i < LOGEVENT_CIRCULAR_MAX; i++)
+            es->events_circular[i] = NULL;
     }
+
+    if (es->ninitial < LOGEVENT_INITIAL_MAX)
+        location = &es->events_initial[es->ninitial];
+    else
+        location = &es->events_circular[(es->circular_first + es->ncircular) % LOGEVENT_CIRCULAR_MAX];
 
     tm=ltime();
     strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S\t", &tm);
 
-    es->events[es->nevents] = snewn(strlen(timebuf) + strlen(string) + 1, char);
-    strcpy(es->events[es->nevents], timebuf);
-    strcat(es->events[es->nevents], string);
+    sfree(*location);
+    *location = dupcat(timebuf, string, NULL);
     if (es->window) {
-	dlg_listbox_add(es->listctrl, &es->dp, es->events[es->nevents]);
+	dlg_listbox_add(es->listctrl, &es->dp, *location);
     }
-    es->nevents++;
+    if (es->ninitial < LOGEVENT_INITIAL_MAX) {
+        es->ninitial++;
+    } else if (es->ncircular < LOGEVENT_CIRCULAR_MAX) {
+        es->ncircular++;
+    } else if (es->ncircular == LOGEVENT_CIRCULAR_MAX) {
+        es->circular_first = (es->circular_first + 1) % LOGEVENT_CIRCULAR_MAX;
+        sfree(es->events_circular[es->circular_first]);
+        es->events_circular[es->circular_first] = dupstr("..");
+    }
 }
 
 int askappend(void *frontend, Filename *filename,

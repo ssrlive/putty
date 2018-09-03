@@ -68,12 +68,12 @@ Filename *platform_default_filename(const char *name)
 
 char *get_ttymode(void *frontend, const char *mode) { return NULL; }
 
-int get_userpass_input(prompts_t *p, const unsigned char *in, int inlen)
+int get_userpass_input(prompts_t *p, bufchain *input)
 {
     int ret;
-    ret = cmdline_get_passwd_input(p, in, inlen);
+    ret = cmdline_get_passwd_input(p);
     if (ret == -1)
-	ret = console_get_userpass_input(p, in, inlen);
+	ret = console_get_userpass_input(p);
     return ret;
 }
 
@@ -459,6 +459,7 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
     int fd, fdstate, rwx, ret, maxfd;
     unsigned long now = GETTICKCOUNT();
     unsigned long next;
+    int done_something = FALSE;
 
     fdlist = NULL;
     fdcount = fdsize = 0;
@@ -509,7 +510,7 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
             tv.tv_usec = 0;
             ret = select(maxfd, &rset, &wset, &xset, &tv);
             if (ret == 0)
-                run_toplevel_callbacks();
+                done_something |= run_toplevel_callbacks();
         } else if (run_timers(now, &next)) {
             do {
                 unsigned long then;
@@ -535,7 +536,7 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
                 ret = select(maxfd, &rset, &wset, &xset, NULL);
             } while (ret < 0 && errno == EINTR);
         }
-    } while (ret == 0);
+    } while (ret == 0 && !done_something);
 
     if (ret < 0) {
 	perror("select");

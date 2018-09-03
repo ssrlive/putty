@@ -16,27 +16,31 @@
 #endif
 #endif
 
-#ifndef DONE_TYPEDEFS
-#define DONE_TYPEDEFS
-typedef struct conf_tag Conf;
-typedef struct backend_tag Backend;
-typedef struct terminal_tag Terminal;
-#endif
-
+#include "defs.h"
 #include "puttyps.h"
 #include "network.h"
 #include "misc.h"
+#include "marshal.h"
 
 /*
- * Fingerprints of the PGP master keys that can be used to establish a trust
- * path between an executable and other files.
+ * We express various time intervals in unsigned long minutes, but may need to
+ * clip some values so that the resulting number of ticks does not overflow an
+ * integer value.
  */
-#define PGP_MASTER_KEY_FP \
+#define MAX_TICK_MINS	(INT_MAX / (60 * TICKSPERSEC))
+
+/*
+ * Fingerprints of the current and previous PGP master keys, to
+ * establish a trust path between an executable and other files.
+ */
+#define PGP_MASTER_KEY_YEAR "2018"
+#define PGP_MASTER_KEY_DETAILS "RSA, 4096-bit"
+#define PGP_MASTER_KEY_FP                                       \
+    "24E1 B1C5 75EA 3C9F F752  A922 76BC 7FE4 EBFD 2D9E"
+#define PGP_PREV_MASTER_KEY_YEAR "2015"
+#define PGP_PREV_MASTER_KEY_DETAILS "RSA, 4096-bit"
+#define PGP_PREV_MASTER_KEY_FP                                  \
     "440D E3B5 B7A1 CA85 B3CC  1718 AB58 5DC6 0467 6F7C"
-#define PGP_RSA_MASTER_KEY_FP \
-    "8F 15 97 DA 25 30 AB 0D  88 D1 92 54 11 CF 0C 4C"
-#define PGP_DSA_MASTER_KEY_FP \
-    "313C 3E76 4B74 C2C5 F2AE  83A8 4F5E 6DF5 6A93 B34E"
 
 /* Three attribute types: 
  * The ATTRs (normal attributes) are stored with the characters in
@@ -531,8 +535,6 @@ GLOBAL int loaded_session;
  */
 GLOBAL char *cmdline_session_name;
 
-struct RSAKey;			       /* be a little careful of scope */
-
 /*
  * Mechanism for getting text strings such as usernames and passwords
  * from the front-end.
@@ -685,8 +687,8 @@ void frontend_echoedit_update(void *frontend, int echo, int edit);
  * special commands changes. It does not need to invoke it at session
  * shutdown. */
 void update_specials_menu(void *frontend);
-int from_backend(void *frontend, int is_stderr, const char *data, int len);
-int from_backend_untrusted(void *frontend, const char *data, int len);
+int from_backend(void *frontend, int is_stderr, const void *data, int len);
+int from_backend_untrusted(void *frontend, const void *data, int len);
 /* Called when the back end wants to indicate that EOF has arrived on
  * the server-to-client stream. Returns FALSE to indicate that we
  * intend to keep the session open in the other direction, or TRUE to
@@ -699,9 +701,9 @@ char *get_ttymode(void *frontend, const char *mode);
 /*
  * >0 = `got all results, carry on'
  * 0  = `user cancelled' (FIXME distinguish "give up entirely" and "next auth"?)
- * <0 = `please call back later with more in/inlen'
+ * <0 = `please call back later with a fuller bufchain'
  */
-int get_userpass_input(prompts_t *p, const unsigned char *in, int inlen);
+int get_userpass_input(prompts_t *p, bufchain *input);
 #define OPTIMISE_IS_SCROLL 1
 
 void set_iconic(void *frontend, int iconic);
@@ -787,8 +789,10 @@ void cleanup_exit(int);
     X(INT, NONE, ssh_show_banner) /* show USERAUTH_BANNERs (SSH-2 only) */ \
     X(INT, NONE, try_tis_auth) \
     X(INT, NONE, try_ki_auth) \
-    X(INT, NONE, try_gssapi_auth) /* attempt gssapi auth */ \
+    X(INT, NONE, try_gssapi_auth) /* attempt gssapi auth via ssh userauth */ \
+    X(INT, NONE, try_gssapi_kex) /* attempt gssapi auth via ssh kex */ \
     X(INT, NONE, gssapifwd) /* forward tgt via gss */ \
+    X(INT, NONE, gssapirekey) /* KEXGSS refresh interval (mins) */ \
     X(INT, INT, ssh_gsslist) /* preference order for local GSS libs */ \
     X(FILENAME, NONE, ssh_gss_custom) \
     X(INT, NONE, ssh_subsys) /* run a subsystem rather than a command */ \
@@ -895,7 +899,9 @@ void cleanup_exit(int);
     /* Selection options */ \
     X(INT, NONE, mouse_is_xterm) \
     X(INT, NONE, rect_select) \
+    X(INT, NONE, paste_controls) \
     X(INT, NONE, rawcnp) \
+    X(INT, NONE, utf8linedraw) \
     X(INT, NONE, rtf_paste) \
     X(INT, NONE, mouse_override) \
     X(INT, INT, wordness) \
@@ -1010,9 +1016,8 @@ void conf_del_str_str(Conf *conf, int key, const char *subkey);
 void conf_set_filename(Conf *conf, int key, const Filename *val);
 void conf_set_fontspec(Conf *conf, int key, const FontSpec *val);
 /* Serialisation functions for Duplicate Session */
-int conf_serialised_size(Conf *conf);
-void conf_serialise(Conf *conf, void *data);
-int conf_deserialise(Conf *conf, void *data, int maxsize);/*returns size used*/
+void conf_serialise(BinarySink *bs, Conf *conf);
+int conf_deserialise(Conf *conf, BinarySource *src);/*returns true on success*/
 
 /*
  * Functions to copy, free, serialise and deserialise FontSpecs.
@@ -1025,8 +1030,8 @@ int conf_deserialise(Conf *conf, void *data, int maxsize);/*returns size used*/
  */
 FontSpec *fontspec_copy(const FontSpec *f);
 void fontspec_free(FontSpec *f);
-int fontspec_serialise(FontSpec *f, void *data);
-FontSpec *fontspec_deserialise(void *data, int maxsize, int *used);
+void fontspec_serialise(BinarySink *bs, FontSpec *f);
+FontSpec *fontspec_deserialise(BinarySource *src);
 
 /*
  * Exports from noise.c.
@@ -1100,16 +1105,15 @@ void term_reconfig(Terminal *, Conf *);
 void term_request_copy(Terminal *, const int *clipboards, int n_clipboards);
 void term_request_paste(Terminal *, int clipboard);
 void term_seen_key_event(Terminal *); 
-int term_data(Terminal *, int is_stderr, const char *data, int len);
-int term_data_untrusted(Terminal *, const char *data, int len);
+int term_data(Terminal *, int is_stderr, const void *data, int len);
+int term_data_untrusted(Terminal *, const void *data, int len);
 void term_provide_resize_fn(Terminal *term,
 			    void (*resize_fn)(void *, int, int),
 			    void *resize_ctx);
 void term_provide_logctx(Terminal *term, void *logctx);
 void term_set_focus(Terminal *term, int has_focus);
 char *term_get_ttymode(Terminal *term, const char *mode);
-int term_get_userpass_input(Terminal *term, prompts_t *p,
-			    const unsigned char *in, int inlen);
+int term_get_userpass_input(Terminal *term, prompts_t *p, bufchain *input);
 
 int format_arrow_key(char *buf, Terminal *term, int xkey, int ctrl);
 
@@ -1173,7 +1177,7 @@ extern Backend ssh_backend;
 void *ldisc_create(Conf *, Terminal *, Backend *, void *, void *);
 void ldisc_configure(void *, Conf *);
 void ldisc_free(void *);
-void ldisc_send(void *handle, const char *buf, int len, int interactive);
+void ldisc_send(void *handle, const void *buf, int len, int interactive);
 void ldisc_echoedit_update(void *handle);
 
 /*
@@ -1258,14 +1262,6 @@ int mk_wcwidth_cjk(unsigned int ucs);
 int mk_wcswidth_cjk(const unsigned int *pwcs, size_t n);
 
 /*
- * Exports from mscrypto.c
- */
-#ifdef MSCRYPTOAPI
-int crypto_startup();
-void crypto_wrapup();
-#endif
-
-/*
  * Exports from pageantc.c.
  * 
  * agent_query returns NULL for here's-a-response, and non-NULL for
@@ -1290,10 +1286,10 @@ void crypto_wrapup();
  */
 typedef struct agent_pending_query agent_pending_query;
 agent_pending_query *agent_query(
-    void *in, int inlen, void **out, int *outlen,
+    strbuf *in, void **out, int *outlen,
     void (*callback)(void *, void *, int), void *callback_ctx);
 void agent_cancel_query(agent_pending_query *);
-void agent_query_synchronous(void *in, int inlen, void **out, int *outlen);
+void agent_query_synchronous(strbuf *in, void **out, int *outlen);
 int agent_exists(void);
 
 /*
@@ -1356,8 +1352,7 @@ int askappend(void *frontend, Filename *filename,
  * that aren't equivalents to things in windlg.c et al.
  */
 extern int console_batch_mode;
-int console_get_userpass_input(prompts_t *p, const unsigned char *in,
-                               int inlen);
+int console_get_userpass_input(prompts_t *p);
 void console_provide_logctx(void *logctx);
 int is_interactive(void);
 
@@ -1386,7 +1381,7 @@ void printer_finish_job(printer_job *);
 int cmdline_process_param(const char *, char *, int, Conf *);
 void cmdline_run_saved(Conf *);
 void cmdline_cleanup(void);
-int cmdline_get_passwd_input(prompts_t *p, const unsigned char *in, int inlen);
+int cmdline_get_passwd_input(prompts_t *p);
 int cmdline_host_ok(Conf *);
 #define TOOLTYPE_FILETRANSFER 1
 #define TOOLTYPE_NONNETWORK 2
@@ -1462,11 +1457,12 @@ int filename_equal(const Filename *f1, const Filename *f2);
 int filename_is_null(const Filename *fn);
 Filename *filename_copy(const Filename *fn);
 void filename_free(Filename *fn);
-int filename_serialise(const Filename *f, void *data);
-Filename *filename_deserialise(void *data, int maxsize, int *used);
+void filename_serialise(BinarySink *bs, const Filename *f);
+Filename *filename_deserialise(BinarySource *src);
 char *get_username(void);	       /* return value needs freeing */
 char *get_random_data(int bytes, const char *device); /* used in cmdgen.c */
 char filename_char_sanitise(char c);   /* rewrite special pathname chars */
+int open_for_write_would_lose_data(const Filename *fn);
 
 /*
  * Exports and imports from timing.c.
@@ -1585,12 +1581,33 @@ unsigned long timing_last_clock(void);
  * actually running it (e.g. so as to put a zero timeout on a select()
  * call) then it can call toplevel_callback_pending(), which will
  * return true if at least one callback is in the queue.
+ *
+ * run_toplevel_callbacks() returns TRUE if it ran any actual code.
+ * This can be used as a means of speculatively terminating a select
+ * loop, as in PSFTP, for example - if a callback has run then perhaps
+ * it might have done whatever the loop's caller was waiting for.
  */
 typedef void (*toplevel_callback_fn_t)(void *ctx);
 void queue_toplevel_callback(toplevel_callback_fn_t fn, void *ctx);
-void run_toplevel_callbacks(void);
+int run_toplevel_callbacks(void);
 int toplevel_callback_pending(void);
 void delete_callbacks_for_context(void *ctx);
+
+/*
+ * Another facility in callback.c deals with 'idempotent' callbacks,
+ * defined as those which never need to be scheduled again if they are
+ * already scheduled and have not yet run. (An example would be one
+ * which, when called, empties a queue of data completely: when data
+ * is added to the queue, you must ensure a run of the queue-consuming
+ * function has been scheduled, but if one is already pending, you
+ * don't need to schedule a second one.)
+ */
+struct IdempotentCallback {
+    toplevel_callback_fn_t fn;
+    void *ctx;
+    int queued;
+};
+void queue_idempotent_callback(struct IdempotentCallback *ic);
 
 typedef void (*toplevel_callback_notify_fn_t)(void *frontend);
 void request_callback_notifications(toplevel_callback_notify_fn_t notify,

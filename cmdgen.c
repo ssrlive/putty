@@ -46,7 +46,7 @@ char *get_random_data(int len, const char *device)
 #define console_get_userpass_input console_get_userpass_input_diagnostic
 int nprompts, promptsgot;
 const char *prompts[3];
-int console_get_userpass_input(prompts_t *p, unsigned char *in, int inlen)
+int console_get_userpass_input(prompts_t *p)
 {
     size_t i;
     int ret = 1;
@@ -246,10 +246,8 @@ int main(int argc, char **argv)
     int sshver = 0;
     struct ssh2_userkey *ssh2key = NULL;
     struct RSAKey *ssh1key = NULL;
-    unsigned char *ssh2blob = NULL;
+    strbuf *ssh2blob = NULL;
     char *ssh2alg = NULL;
-    const struct ssh_signkey *ssh2algf = NULL;
-    int ssh2bloblen;
     char *old_passphrase = NULL, *new_passphrase = NULL;
     int load_encrypted;
     progfn_t progressfn = is_interactive() ? progress_update : no_progress;
@@ -723,22 +721,19 @@ int main(int argc, char **argv)
 	    struct dss_key *dsskey = snew(struct dss_key);
 	    dsa_generate(dsskey, bits, progressfn, &prog);
 	    ssh2key = snew(struct ssh2_userkey);
-	    ssh2key->data = dsskey;
-	    ssh2key->alg = &ssh_dss;
+	    ssh2key->key = &dsskey->sshk;
 	    ssh1key = NULL;
         } else if (keytype == ECDSA) {
             struct ec_key *ec = snew(struct ec_key);
             ec_generate(ec, bits, progressfn, &prog);
             ssh2key = snew(struct ssh2_userkey);
-            ssh2key->data = ec;
-            ssh2key->alg = ec->signalg;
+            ssh2key->key = &ec->sshk;
             ssh1key = NULL;
         } else if (keytype == ED25519) {
             struct ec_key *ec = snew(struct ec_key);
             ec_edgenerate(ec, bits, progressfn, &prog);
             ssh2key = snew(struct ssh2_userkey);
-            ssh2key->data = ec;
-            ssh2key->alg = &ssh_ecdsa_ed25519;
+            ssh2key->key = &ec->sshk;
             ssh1key = NULL;
 	} else {
 	    struct RSAKey *rsakey = snew(struct RSAKey);
@@ -748,8 +743,7 @@ int main(int argc, char **argv)
 		ssh1key = rsakey;
 	    } else {
 		ssh2key = snew(struct ssh2_userkey);
-		ssh2key->data = rsakey;
-		ssh2key->alg = &ssh_rsa;
+		ssh2key->key = &rsakey->sshk;
 	    }
 	}
 	progressfn(&prog, PROGFN_PROGRESS, INT_MAX, -1);
@@ -769,7 +763,7 @@ int main(int argc, char **argv)
 	 * Find out whether the input key is encrypted.
 	 */
 	if (intype == SSH_KEYTYPE_SSH1)
-	    encrypted = rsakey_encrypted(infilename, &origcomment);
+	    encrypted = rsa_ssh1_encrypted(infilename, &origcomment);
 	else if (intype == SSH_KEYTYPE_SSH2)
 	    encrypted = ssh2_userkey_encrypted(infilename, &origcomment);
 	else
@@ -785,7 +779,7 @@ int main(int argc, char **argv)
 		p->to_server = FALSE;
 		p->name = dupstr("SSH key passphrase");
 		add_prompt(p, dupstr("Enter passphrase to load key: "), FALSE);
-		ret = console_get_userpass_input(p, NULL, 0);
+		ret = console_get_userpass_input(p);
 		assert(ret >= 0);
 		if (!ret) {
 		    free_prompts(p);
@@ -807,36 +801,24 @@ int main(int argc, char **argv)
           case SSH_KEYTYPE_SSH1_PUBLIC:
 	    ssh1key = snew(struct RSAKey);
 	    if (!load_encrypted) {
-		void *vblob;
-		unsigned char *blob;
-		int n, l, bloblen;
+		strbuf *blob;
+                BinarySource src[1];
 
-		ret = rsakey_pubblob(infilename, &vblob, &bloblen,
-				     &origcomment, &error);
-		blob = (unsigned char *)vblob;
+                blob = strbuf_new();
+		ret = rsa_ssh1_loadpub(infilename, BinarySink_UPCAST(blob),
+                                       &origcomment, &error);
+                BinarySource_BARE_INIT(src, blob->u, blob->len);
+                get_rsa_ssh1_pub(src, ssh1key, RSA_SSH1_EXPONENT_FIRST);
+                strbuf_free(blob);
 
-		n = 4;		       /* skip modulus bits */
-		
-		l = ssh1_read_bignum(blob + n, bloblen - n,
-				     &ssh1key->exponent);
-		if (l < 0) {
-		    error = "SSH-1 public key blob was too short";
-		} else {
-		    n += l;
-		    l = ssh1_read_bignum(blob + n, bloblen - n,
-					 &ssh1key->modulus);
-		    if (l < 0) {
-			error = "SSH-1 public key blob was too short";
-		    } else
-			n += l;
-		}
 		ssh1key->comment = dupstr(origcomment);
 		ssh1key->private_exponent = NULL;
 		ssh1key->p = NULL;
 		ssh1key->q = NULL;
 		ssh1key->iqmp = NULL;
 	    } else {
-		ret = loadrsakey(infilename, ssh1key, old_passphrase, &error);
+		ret = rsa_ssh1_loadkey(
+                    infilename, ssh1key, old_passphrase, &error);
 	    }
 	    if (ret > 0)
 		error = NULL;
@@ -848,16 +830,17 @@ int main(int argc, char **argv)
           case SSH_KEYTYPE_SSH2_PUBLIC_RFC4716:
           case SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH:
 	    if (!load_encrypted) {
-		ssh2blob = ssh2_userkey_loadpub(infilename, &ssh2alg,
-						&ssh2bloblen, &origcomment,
-                                                &error);
-                if (ssh2blob) {
-                    ssh2algf = find_pubkey_alg(ssh2alg);
-                    if (ssh2algf)
-                        bits = ssh2algf->pubkey_bits(ssh2algf,
-                                                     ssh2blob, ssh2bloblen);
+                ssh2blob = strbuf_new();
+		if (ssh2_userkey_loadpub(infilename, &ssh2alg, BinarySink_UPCAST(ssh2blob),
+                                         &origcomment, &error)) {
+                    const ssh_keyalg *alg = find_pubkey_alg(ssh2alg);
+                    if (alg)
+                        bits = ssh_key_public_bits(
+                            alg, make_ptrlen(ssh2blob->s, ssh2blob->len));
                     else
                         bits = -1;
+                } else {
+                    strbuf_free(ssh2blob);
                 }
                 sfree(ssh2alg);
 	    } else {
@@ -932,7 +915,7 @@ int main(int argc, char **argv)
 	p->name = dupstr("New SSH key passphrase");
 	add_prompt(p, dupstr("Enter passphrase to save key: "), FALSE);
 	add_prompt(p, dupstr("Re-enter passphrase to verify: "), FALSE);
-	ret = console_get_userpass_input(p, NULL, 0);
+	ret = console_get_userpass_input(p);
 	assert(ret >= 0);
 	if (!ret) {
 	    free_prompts(p);
@@ -972,7 +955,7 @@ int main(int argc, char **argv)
       case PRIVATE:
 	if (sshver == 1) {
 	    assert(ssh1key);
-	    ret = saversakey(outfilename, ssh1key, new_passphrase);
+	    ret = rsa_ssh1_savekey(outfilename, ssh1key, new_passphrase);
 	    if (!ret) {
 		fprintf(stderr, "puttygen: unable to save SSH-1 private key\n");
 		return 1;
@@ -1006,12 +989,12 @@ int main(int argc, char **argv)
             } else {
                 if (!ssh2blob) {
                     assert(ssh2key);
-                    ssh2blob = ssh2key->alg->public_blob(ssh2key->data,
-                                                         &ssh2bloblen);
+                    ssh2blob = strbuf_new();
+                    ssh_key_public_blob(ssh2key->key, BinarySink_UPCAST(ssh2blob));
                 }
 
                 ssh2_write_pubkey(fp, ssh2key ? ssh2key->comment : origcomment,
-                                  ssh2blob, ssh2bloblen,
+                                  ssh2blob->s, ssh2blob->len,
                                   (outtype == PUBLIC ?
                                    SSH_KEYTYPE_SSH2_PUBLIC_RFC4716 :
                                    SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH));
@@ -1029,15 +1012,14 @@ int main(int argc, char **argv)
 
 	    if (sshver == 1) {
 		assert(ssh1key);
-		fingerprint = snewn(128, char);
-		rsa_fingerprint(fingerprint, 128, ssh1key);
+		fingerprint = rsa_ssh1_fingerprint(ssh1key);
 	    } else {
 		if (ssh2key) {
-		    fingerprint = ssh2_fingerprint(ssh2key->alg,
-                                                   ssh2key->data);
+		    fingerprint = ssh2_fingerprint(ssh2key->key);
 		} else {
 		    assert(ssh2blob);
-		    fingerprint = ssh2_fingerprint_blob(ssh2blob, ssh2bloblen);
+		    fingerprint = ssh2_fingerprint_blob(
+                        ssh2blob->s, ssh2blob->len);
 		}
 	    }
 
@@ -1097,7 +1079,7 @@ int main(int argc, char **argv)
     if (ssh1key)
 	freersakey(ssh1key);
     if (ssh2key) {
-	ssh2key->alg->freekey(ssh2key->data);
+	ssh_key_free(ssh2key->key);
 	sfree(ssh2key);
     }
 

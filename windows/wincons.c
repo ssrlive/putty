@@ -26,9 +26,6 @@ void cleanup_exit(int code)
     sk_cleanup();
 
     random_save_seed();
-#ifdef MSCRYPTOAPI
-    crypto_wrapup();
-#endif
 
     exit(code);
 }
@@ -330,12 +327,12 @@ void pgp_fingerprints(void)
 	  "one. See the manual for more information.\n"
 	  "(Note: these fingerprints have nothing to do with SSH!)\n"
 	  "\n"
-	  "PuTTY Master Key as of 2015 (RSA, 4096-bit):\n"
+	  "PuTTY Master Key as of " PGP_MASTER_KEY_YEAR
+          " (" PGP_MASTER_KEY_DETAILS "):\n"
 	  "  " PGP_MASTER_KEY_FP "\n\n"
-	  "Original PuTTY Master Key (RSA, 1024-bit):\n"
-	  "  " PGP_RSA_MASTER_KEY_FP "\n"
-	  "Original PuTTY Master Key (DSA, 1024-bit):\n"
-	  "  " PGP_DSA_MASTER_KEY_FP "\n", stdout);
+	  "Previous Master Key (" PGP_PREV_MASTER_KEY_YEAR
+          ", " PGP_PREV_MASTER_KEY_DETAILS "):\n"
+	  "  " PGP_PREV_MASTER_KEY_FP "\n", stdout);
 }
 
 void console_provide_logctx(void *logctx)
@@ -355,10 +352,9 @@ static void console_data_untrusted(HANDLE hout, const char *data, int len)
     WriteFile(hout, data, len, &dummy, NULL);
 }
 
-int console_get_userpass_input(prompts_t *p,
-                               const unsigned char *in, int inlen)
+int console_get_userpass_input(prompts_t *p)
 {
-    HANDLE hin, hout;
+    HANDLE hin = INVALID_HANDLE_VALUE, hout = INVALID_HANDLE_VALUE;
     size_t curr_prompt;
 
     /*

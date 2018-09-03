@@ -65,6 +65,8 @@
 #define gtk_adjustment_set_page_increment(a, val) ((a)->page_increment = (val))
 #define gtk_adjustment_set_step_increment(a, val) ((a)->step_increment = (val))
 #define gtk_adjustment_get_value(a) ((a)->value)
+#define gtk_selection_data_get_selection(a) ((a)->selection)
+#define gdk_display_beep(disp) gdk_beep()
 
 #define gtk_widget_set_has_window(w, b)                 \
     gtk1_widget_set_unset_flag(w, GTK_NO_WINDOW, !(b))
@@ -82,6 +84,11 @@
  * GTK1 it makes sense to omit the contained function call and just
  * return the GDK default display. */
 #define GDK_DISPLAY_XDISPLAY(x) GDK_DISPLAY()
+
+#define GDK_KEY_C                    ('C')
+#define GDK_KEY_V                    ('V')
+#define GDK_KEY_c                    ('c')
+#define GDK_KEY_v                    ('v')
 
 #endif /* 2.0 */
 
@@ -169,6 +176,10 @@
 #define gtk_combo_box_new_with_model_and_entry(t) gtk_combo_box_entry_new_with_model(t, 1)
 
 #endif /* 2.24 */
+
+#if !GTK_CHECK_VERSION(3,0,0)
+#define GDK_IS_X11_WINDOW(window) (1)
+#endif
 
 #if GTK_CHECK_VERSION(3,0,0)
 #define STANDARD_OK_LABEL "_OK"

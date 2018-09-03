@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <limits.h>
+#include <wchar.h>
 
 #include <time.h>
 #include <assert.h>
@@ -1044,6 +1045,27 @@ static int sblines(Terminal *term)
     return sblines;
 }
 
+static void null_line_error(Terminal *term, int y, int lineno,
+                            tree234 *whichtree, int treeindex,
+                            const char *varname)
+{
+    extern const char commitid[]; /* in version.c */
+    modalfatalbox("%s==NULL in terminal.c\n"
+                  "lineno=%d y=%d w=%d h=%d\n"
+                  "count(scrollback=%p)=%d\n"
+                  "count(screen=%p)=%d\n"
+                  "count(alt=%p)=%d alt_sblines=%d\n"
+                  "whichtree=%p treeindex=%d\n"
+                  "commitid=%s\n\n"
+                  "Please contact <putty@projects.tartarus.org> "
+                  "and pass on the above information.",
+                  varname, lineno, y, term->cols, term->rows,
+                  term->scrollback, count234(term->scrollback),
+                  term->screen, count234(term->screen),
+                  term->alt_screen, count234(term->alt_screen),
+                  term->alt_sblines, whichtree, treeindex, commitid);
+}
+
 /*
  * Retrieve a line of the screen or of the scrollback, according to
  * whether the y coordinate is non-negative or negative
@@ -1078,27 +1100,16 @@ static termline *lineptr(Terminal *term, int y, int lineno, int screen)
     }
     if (whichtree == term->scrollback) {
 	unsigned char *cline = index234(whichtree, treeindex);
+        if (!cline)
+            null_line_error(term, y, lineno, whichtree, treeindex, "cline");
 	line = decompressline(cline, NULL);
     } else {
 	line = index234(whichtree, treeindex);
     }
 
     /* We assume that we don't screw up and retrieve something out of range. */
-    if (line == NULL) {
-	modalfatalbox("line==NULL in terminal.c\n"
-                      "lineno=%d y=%d w=%d h=%d\n"
-                      "count(scrollback=%p)=%d\n"
-                      "count(screen=%p)=%d\n"
-                      "count(alt=%p)=%d alt_sblines=%d\n"
-                      "whichtree=%p treeindex=%d\n\n"
-                      "Please contact <putty@projects.tartarus.org> "
-                      "and pass on the above information.",
-                      lineno, y, term->cols, term->rows,
-                      term->scrollback, count234(term->scrollback),
-                      term->screen, count234(term->screen),
-                      term->alt_screen, count234(term->alt_screen),
-                      term->alt_sblines, whichtree, treeindex);
-    }
+    if (line == NULL)
+        null_line_error(term, y, lineno, whichtree, treeindex, "line");
     assert(line != NULL);
 
     /*
@@ -1455,6 +1466,7 @@ void term_copy_stuff_from_conf(Terminal *term)
     term->no_remote_wintitle = conf_get_int(term->conf, CONF_no_remote_wintitle);
     term->no_remote_clearscroll = conf_get_int(term->conf, CONF_no_remote_clearscroll);
     term->rawcnp = conf_get_int(term->conf, CONF_rawcnp);
+    term->utf8linedraw = conf_get_int(term->conf, CONF_utf8linedraw);
     term->rect_select = conf_get_int(term->conf, CONF_rect_select);
     term->remote_qtitle_action = conf_get_int(term->conf, CONF_remote_qtitle_action);
     term->rxvt_homeend = conf_get_int(term->conf, CONF_rxvt_homeend);
@@ -2815,6 +2827,143 @@ static void term_print_finish(Terminal *term)
     term->printing = term->only_printing = FALSE;
 }
 
+static void term_display_graphic_char(Terminal *term, unsigned long c)
+{
+    termline *cline = scrlineptr(term->curs.y);
+    int width = 0;
+    if (DIRECT_CHAR(c))
+        width = 1;
+    if (!width)
+        width = (term->cjk_ambig_wide ?
+                 mk_wcwidth_cjk((unsigned int) c) :
+                 mk_wcwidth((unsigned int) c));
+
+    if (term->wrapnext && term->wrap && width > 0) {
+        cline->lattr |= LATTR_WRAPPED;
+        if (term->curs.y == term->marg_b)
+            scroll(term, term->marg_t, term->marg_b, 1, TRUE);
+        else if (term->curs.y < term->rows - 1)
+            term->curs.y++;
+        term->curs.x = 0;
+        term->wrapnext = FALSE;
+        cline = scrlineptr(term->curs.y);
+    }
+    if (term->insert && width > 0)
+        insch(term, width);
+    if (term->selstate != NO_SELECTION) {
+        pos cursplus = term->curs;
+        incpos(cursplus);
+        check_selection(term, term->curs, cursplus);
+    }
+    if (((c & CSET_MASK) == CSET_ASCII ||
+         (c & CSET_MASK) == 0) && term->logctx)
+        logtraffic(term->logctx, (unsigned char) c, LGTYP_ASCII);
+
+    switch (width) {
+      case 2:
+        /*
+         * If we're about to display a double-width character starting
+         * in the rightmost column, then we do something special
+         * instead. We must print a space in the last column of the
+         * screen, then wrap; and we also set LATTR_WRAPPED2 which
+         * instructs subsequent cut-and-pasting not only to splice
+         * this line to the one after it, but to ignore the space in
+         * the last character position as well. (Because what was
+         * actually output to the terminal was presumably just a
+         * sequence of CJK characters, and we don't want a space to be
+         * pasted in the middle of those just because they had the
+         * misfortune to start in the wrong parity column. xterm
+         * concurs.)
+         */
+        check_boundary(term, term->curs.x, term->curs.y);
+        check_boundary(term, term->curs.x+2, term->curs.y);
+        if (term->curs.x == term->cols-1) {
+            copy_termchar(cline, term->curs.x,
+                          &term->erase_char);
+            cline->lattr |= LATTR_WRAPPED | LATTR_WRAPPED2;
+            if (term->curs.y == term->marg_b)
+                scroll(term, term->marg_t, term->marg_b,
+                       1, TRUE);
+            else if (term->curs.y < term->rows - 1)
+                term->curs.y++;
+            term->curs.x = 0;
+            cline = scrlineptr(term->curs.y);
+            /* Now we must check_boundary again, of course. */
+            check_boundary(term, term->curs.x, term->curs.y);
+            check_boundary(term, term->curs.x+2, term->curs.y);
+        }
+
+        /* FULL-TERMCHAR */
+        clear_cc(cline, term->curs.x);
+        cline->chars[term->curs.x].chr = c;
+        cline->chars[term->curs.x].attr = term->curr_attr;
+        cline->chars[term->curs.x].truecolour =
+            term->curr_truecolour;
+
+        term->curs.x++;
+
+        /* FULL-TERMCHAR */
+        clear_cc(cline, term->curs.x);
+        cline->chars[term->curs.x].chr = UCSWIDE;
+        cline->chars[term->curs.x].attr = term->curr_attr;
+        cline->chars[term->curs.x].truecolour =
+            term->curr_truecolour;
+
+        break;
+      case 1:
+        check_boundary(term, term->curs.x, term->curs.y);
+        check_boundary(term, term->curs.x+1, term->curs.y);
+
+        /* FULL-TERMCHAR */
+        clear_cc(cline, term->curs.x);
+        cline->chars[term->curs.x].chr = c;
+        cline->chars[term->curs.x].attr = term->curr_attr;
+        cline->chars[term->curs.x].truecolour =
+            term->curr_truecolour;
+
+        break;
+      case 0:
+        if (term->curs.x > 0) {
+            int x = term->curs.x - 1;
+
+            /* If we're in wrapnext state, the character to combine
+             * with is _here_, not to our left. */
+            if (term->wrapnext)
+                x++;
+
+            /*
+             * If the previous character is UCSWIDE, back up another
+             * one.
+             */
+            if (cline->chars[x].chr == UCSWIDE) {
+                assert(x > 0);
+                x--;
+            }
+
+            add_cc(cline, x, c);
+            seen_disp_event(term);
+        }
+        return;
+      default:
+        return;
+    }
+    term->curs.x++;
+    if (term->curs.x == term->cols) {
+        term->curs.x--;
+        term->wrapnext = TRUE;
+        if (term->wrap && term->vt52_mode) {
+            cline->lattr |= LATTR_WRAPPED;
+            if (term->curs.y == term->marg_b)
+                scroll(term, term->marg_t, term->marg_b, 1, TRUE);
+            else if (term->curs.y < term->rows - 1)
+                term->curs.y++;
+            term->curs.x = 0;
+            term->wrapnext = FALSE;
+        }
+    }
+    seen_disp_event(term);
+}
+
 /*
  * Remove everything currently in `inbuf' and stick it up on the
  * in-memory display. There's a big state machine in here to
@@ -2902,6 +3051,10 @@ static void term_out(Terminal *term)
 			/* UTF-8 must be stateless so we ignore iso2022. */
 			if (term->ucsdata->unitab_ctrl[c] != 0xFF) 
 			     c = term->ucsdata->unitab_ctrl[c];
+                        else if ((term->utf8linedraw) &&
+                                 (term->cset_attr[term->cset] == CSET_LINEDRW))
+                            /* Linedraw characters are explicitly enabled */
+                            c = ((unsigned char) c) | CSET_LINEDRW;
 			else c = ((unsigned char)c) | CSET_ASCII;
 			break;
 		    } else if ((c & 0xe0) == 0xc0) {
@@ -3225,148 +3378,8 @@ static void term_out(Terminal *term)
 	      case TOPLEVEL:
 		/* Only graphic characters get this far;
 		 * ctrls are stripped above */
-		{
-		    termline *cline = scrlineptr(term->curs.y);
-		    int width = 0;
-		    if (DIRECT_CHAR(c))
-			width = 1;
-		    if (!width)
-			width = (term->cjk_ambig_wide ?
-				 mk_wcwidth_cjk((unsigned int) c) :
-				 mk_wcwidth((unsigned int) c));
-
-		    if (term->wrapnext && term->wrap && width > 0) {
-			cline->lattr |= LATTR_WRAPPED;
-			if (term->curs.y == term->marg_b)
-			    scroll(term, term->marg_t, term->marg_b, 1, TRUE);
-			else if (term->curs.y < term->rows - 1)
-			    term->curs.y++;
-			term->curs.x = 0;
-			term->wrapnext = FALSE;
-			cline = scrlineptr(term->curs.y);
-		    }
-		    if (term->insert && width > 0)
-			insch(term, width);
-		    if (term->selstate != NO_SELECTION) {
-			pos cursplus = term->curs;
-			incpos(cursplus);
-			check_selection(term, term->curs, cursplus);
-		    }
-		    if (((c & CSET_MASK) == CSET_ASCII ||
-			 (c & CSET_MASK) == 0) &&
-			term->logctx)
-			logtraffic(term->logctx, (unsigned char) c,
-				   LGTYP_ASCII);
-
-		    switch (width) {
-		      case 2:
-			/*
-			 * If we're about to display a double-width
-			 * character starting in the rightmost
-			 * column, then we do something special
-			 * instead. We must print a space in the
-			 * last column of the screen, then wrap;
-			 * and we also set LATTR_WRAPPED2 which
-			 * instructs subsequent cut-and-pasting not
-			 * only to splice this line to the one
-			 * after it, but to ignore the space in the
-			 * last character position as well.
-			 * (Because what was actually output to the
-			 * terminal was presumably just a sequence
-			 * of CJK characters, and we don't want a
-			 * space to be pasted in the middle of
-			 * those just because they had the
-			 * misfortune to start in the wrong parity
-			 * column. xterm concurs.)
-			 */
-			check_boundary(term, term->curs.x, term->curs.y);
-			check_boundary(term, term->curs.x+2, term->curs.y);
-			if (term->curs.x == term->cols-1) {
-			    copy_termchar(cline, term->curs.x,
-					  &term->erase_char);
-			    cline->lattr |= LATTR_WRAPPED | LATTR_WRAPPED2;
-			    if (term->curs.y == term->marg_b)
-				scroll(term, term->marg_t, term->marg_b,
-				       1, TRUE);
-			    else if (term->curs.y < term->rows - 1)
-				term->curs.y++;
-			    term->curs.x = 0;
-			    cline = scrlineptr(term->curs.y);
-			    /* Now we must check_boundary again, of course. */
-			    check_boundary(term, term->curs.x, term->curs.y);
-			    check_boundary(term, term->curs.x+2, term->curs.y);
-			}
-
-			/* FULL-TERMCHAR */
-			clear_cc(cline, term->curs.x);
-			cline->chars[term->curs.x].chr = c;
-			cline->chars[term->curs.x].attr = term->curr_attr;
-			cline->chars[term->curs.x].truecolour =
-                            term->curr_truecolour;
-
-			term->curs.x++;
-
-			/* FULL-TERMCHAR */
-			clear_cc(cline, term->curs.x);
-			cline->chars[term->curs.x].chr = UCSWIDE;
-			cline->chars[term->curs.x].attr = term->curr_attr;
-			cline->chars[term->curs.x].truecolour =
-                            term->curr_truecolour;
-
-			break;
-		      case 1:
-			check_boundary(term, term->curs.x, term->curs.y);
-			check_boundary(term, term->curs.x+1, term->curs.y);
-
-			/* FULL-TERMCHAR */
-			clear_cc(cline, term->curs.x);
-			cline->chars[term->curs.x].chr = c;
-			cline->chars[term->curs.x].attr = term->curr_attr;
-			cline->chars[term->curs.x].truecolour =
-                            term->curr_truecolour;
-
-			break;
-		      case 0:
-			if (term->curs.x > 0) {
-			    int x = term->curs.x - 1;
-
-			    /* If we're in wrapnext state, the character
-			     * to combine with is _here_, not to our left. */
-			    if (term->wrapnext)
-				x++;
-
-			    /*
-			     * If the previous character is
-			     * UCSWIDE, back up another one.
-			     */
-			    if (cline->chars[x].chr == UCSWIDE) {
-				assert(x > 0);
-				x--;
-			    }
-
-			    add_cc(cline, x, c);
-			    seen_disp_event(term);
-			}
-			continue;
-		      default:
-			continue;
-		    }
-		    term->curs.x++;
-		    if (term->curs.x == term->cols) {
-			term->curs.x--;
-			term->wrapnext = TRUE;
-			if (term->wrap && term->vt52_mode) {
-			    cline->lattr |= LATTR_WRAPPED;
-			    if (term->curs.y == term->marg_b)
-				scroll(term, term->marg_t, term->marg_b, 1, TRUE);
-			    else if (term->curs.y < term->rows - 1)
-				term->curs.y++;
-			    term->curs.x = 0;
-			    term->wrapnext = FALSE;
-			}
-		    }
-		    seen_disp_event(term);
-		}
+		term_display_graphic_char(term, c);
+                term->last_graphic_char = c;
 		break;
 
 	      case OSC_MAYBE_ST:
@@ -3632,6 +3645,15 @@ static void term_out(Terminal *term)
 			     term->curs.y + def(term->esc_args[0], 1), 1);
 			seen_disp_event(term);
 			break;
+                      case 'b':        /* REP: repeat previous grap */
+                        CLAMP(term->esc_args[0], term->rows * term->cols);
+                        {
+                            unsigned i;
+                            for (i = 0; i < term->esc_args[0]; i++)
+                                term_display_graphic_char(
+                                    term, term->last_graphic_char);
+                        }
+                        break;
 		      case ANSI('c', '>'):	/* DA: report xterm version */
 			compatibility(OTHER);
 			/* this reports xterm version 136 so that VIM can
@@ -6143,9 +6165,21 @@ static void term_paste_callback(void *vterm)
     term->paste_len = 0;
 }
 
+/*
+ * Specialist string compare function. Returns true if the buffer of
+ * alen wide characters starting at a has as a prefix the buffer of
+ * blen characters starting at b.
+ */
+static int wstartswith(const wchar_t *a, size_t alen,
+                        const wchar_t *b, size_t blen)
+{
+    return alen >= blen && !wcsncmp(a, b, blen);
+}
+
 void term_do_paste(Terminal *term, const wchar_t *data, int len)
 {
-    const wchar_t *p, *q;
+    const wchar_t *p;
+    int paste_controls = conf_get_int(term->conf, CONF_paste_controls);
 
     /*
      * Pasting data into the terminal counts as a keyboard event (for
@@ -6166,26 +6200,51 @@ void term_do_paste(Terminal *term, const wchar_t *data, int len)
         term->paste_len += 6;
     }
 
-    p = q = data;
+    p = data;
     while (p < data + len) {
-        while (p < data + len &&
-               !(p <= data + len - sel_nl_sz &&
-                 !memcmp(p, sel_nl, sizeof(sel_nl))))
-            p++;
+        wchar_t wc = *p++;
 
-        {
-            int i;
-            for (i = 0; i < p - q; i++) {
-                term->paste_buffer[term->paste_len++] = q[i];
+        if (wc == sel_nl[0] &&
+            wstartswith(p-1, data+len-(p-1), sel_nl, sel_nl_sz)) {
+            /*
+             * This is the (platform-dependent) sequence that the host
+             * OS uses to represent newlines in clipboard data.
+             * Normalise it to a press of CR.
+             */
+            p += sel_nl_sz - 1;
+            wc = '\015';
+        }
+
+        if ((wc & ~(wint_t)0x9F) == 0) {
+            /*
+             * This is a control code, either in the range 0x00-0x1F
+             * or 0x80-0x9F. We reject all of these in pastecontrols
+             * mode, except for a small set of permitted ones.
+             */
+            if (!paste_controls) {
+                /* In line with xterm 292, accepted control chars are:
+                 * CR, LF, tab, backspace. (And DEL, i.e. 0x7F, but
+                 * that's permitted by virtue of not matching the bit
+                 * mask that got us into this if statement, so we
+                 * don't have to permit it here. */
+                static const unsigned mask =
+                    (1<<13) | (1<<10) | (1<<9) | (1<<8);
+
+                if (wc > 15 || !((mask >> wc) & 1))
+                    continue;
+            }
+
+            if (wc == '\033' && term->bracketed_paste &&
+                wstartswith(p-1, data+len-(p-1), L"\033[201~", 6)) {
+                /*
+                 * Also, in bracketed-paste mode, reject the ESC
+                 * character that begins the end-of-paste sequence.
+                 */
+                continue;
             }
         }
 
-        if (p <= data + len - sel_nl_sz &&
-            !memcmp(p, sel_nl, sizeof(sel_nl))) {
-            term->paste_buffer[term->paste_len++] = '\015';
-            p += sel_nl_sz;
-        }
-        q = p;
+        term->paste_buffer[term->paste_len++] = wc;
     }
 
     if (term->bracketed_paste) {
@@ -6570,7 +6629,7 @@ int term_ldisc(Terminal *term, int option)
     return FALSE;
 }
 
-int term_data(Terminal *term, int is_stderr, const char *data, int len)
+int term_data(Terminal *term, int is_stderr, const void *data, int len)
 {
     bufchain_add(&term->inbuf, data, len);
 
@@ -6614,8 +6673,9 @@ int term_data(Terminal *term, int is_stderr, const char *data, int len)
  * The only control character that should be honoured is \n (which
  * will behave as a CRLF).
  */
-int term_data_untrusted(Terminal *term, const char *data, int len)
+int term_data_untrusted(Terminal *term, const void *vdata, int len)
 {
+    const char *data = (const char *)vdata;
     int i;
     /* FIXME: more sophisticated checking? */
     for (i = 0; i < len; i++) {
@@ -6665,8 +6725,7 @@ struct term_userpass_state {
  * Process some terminal data in the course of username/password
  * input.
  */
-int term_get_userpass_input(Terminal *term, prompts_t *p,
-			    const unsigned char *in, int inlen)
+int term_get_userpass_input(Terminal *term, prompts_t *p, bufchain *input)
 {
     struct term_userpass_state *s = (struct term_userpass_state *)p->data;
     if (!s) {
@@ -6713,12 +6772,12 @@ int term_get_userpass_input(Terminal *term, prompts_t *p,
 
 	/* Breaking out here ensures that the prompt is printed even
 	 * if we're now waiting for user data. */
-	if (!in || !inlen) break;
+	if (!input || !bufchain_size(input)) break;
 
 	/* FIXME: should we be using local-line-editing code instead? */
-	while (!finished_prompt && inlen) {
-	    char c = *in++;
-	    inlen--;
+	while (!finished_prompt && bufchain_size(input) > 0) {
+	    char c;
+            bufchain_fetch_consume(input, &c, 1);
 	    switch (c) {
 	      case 10:
 	      case 13:

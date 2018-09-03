@@ -51,6 +51,11 @@
 #define NALLCOLOURS (NCFGCOLOURS + NEXTCOLOURS)
 
 GdkAtom compound_text_atom, utf8_string_atom;
+GdkAtom clipboard_atom
+#if GTK_CHECK_VERSION(2,0,0) /* GTK1 will have to fill this in at startup */
+    = GDK_SELECTION_CLIPBOARD
+#endif
+    ;
 
 #ifdef JUST_USE_GTK_CLIPBOARD_UTF8
 /*
@@ -86,11 +91,16 @@ struct clipboard_state {
 struct gui_data {
     GtkWidget *window, *area, *sbar;
     gboolean sbar_visible;
+    gboolean drawing_area_got_size, drawing_area_realised;
+    gboolean drawing_area_setup_needed;
     GtkBox *hbox;
     GtkAdjustment *sbar_adjust;
     GtkWidget *menu, *specialsmenu, *specialsitem1, *specialsitem2,
 	*restartitem;
     GtkWidget *sessionsmenu;
+#ifndef NOT_X_WINDOWS
+    Display *disp;
+#endif
 #ifndef NO_BACKING_PIXMAPS
     /*
      * Server-side pixmap which we use to cache the terminal window's
@@ -139,7 +149,7 @@ struct gui_data {
 #endif
     int clipboard_ctrlshiftins, clipboard_ctrlshiftcv;
     int font_width, font_height;
-    int width, height;
+    int width, height, scale;
     int ignore_sbar;
     int mouseptr_visible;
     int busy_status;
@@ -294,13 +304,13 @@ char *get_ttymode(void *frontend, const char *mode)
     return term_get_ttymode(inst->term, mode);
 }
 
-int from_backend(void *frontend, int is_stderr, const char *data, int len)
+int from_backend(void *frontend, int is_stderr, const void *data, int len)
 {
     struct gui_data *inst = (struct gui_data *)frontend;
     return term_data(inst->term, is_stderr, data, len);
 }
 
-int from_backend_untrusted(void *frontend, const char *data, int len)
+int from_backend_untrusted(void *frontend, const void *data, int len)
 {
     struct gui_data *inst = (struct gui_data *)frontend;
     return term_data_untrusted(inst->term, data, len);
@@ -311,13 +321,13 @@ int from_backend_eof(void *frontend)
     return TRUE;   /* do respond to incoming EOF with outgoing */
 }
 
-int get_userpass_input(prompts_t *p, const unsigned char *in, int inlen)
+int get_userpass_input(prompts_t *p, bufchain *input)
 {
     struct gui_data *inst = (struct gui_data *)p->frontend;
     int ret;
-    ret = cmdline_get_passwd_input(p, in, inlen);
+    ret = cmdline_get_passwd_input(p);
     if (ret == -1)
-	ret = term_get_userpass_input(inst->term, p, in, inlen);
+	ret = term_get_userpass_input(inst->term, p, input);
     return ret;
 }
 
@@ -621,28 +631,58 @@ static void show_mouseptr(struct gui_data *inst, int show)
 
 static void draw_backing_rect(struct gui_data *inst);
 
-gint configure_area(GtkWidget *widget, GdkEventConfigure *event, gpointer data)
+static void drawing_area_setup(struct gui_data *inst, int width, int height)
 {
-    struct gui_data *inst = (struct gui_data *)data;
-    int w, h, need_size = 0;
+    int w, h, new_scale, need_size = 0;
 
     /*
-     * See if the terminal size has changed, in which case we must
-     * let the terminal know.
+     * See if the terminal size has changed.
      */
-    w = (event->width - 2*inst->window_border) / inst->font_width;
-    h = (event->height - 2*inst->window_border) / inst->font_height;
+    w = (width - 2*inst->window_border) / inst->font_width;
+    h = (height - 2*inst->window_border) / inst->font_height;
     if (w != inst->width || h != inst->height) {
+        /*
+         * Update conf.
+         */
 	inst->width = w;
 	inst->height = h;
 	conf_set_int(inst->conf, CONF_width, inst->width);
 	conf_set_int(inst->conf, CONF_height, inst->height);
-	need_size = 1;
+        /*
+         * We'll need to tell terminal.c about the resize below.
+         */
+        need_size = TRUE;
+        /*
+         * And we must refresh the window's backing image.
+         */
+	inst->drawing_area_setup_needed = TRUE;
     }
+
+#if GTK_CHECK_VERSION(3,10,0)
+    new_scale = gtk_widget_get_scale_factor(inst->area);
+    if (new_scale != inst->scale)
+	inst->drawing_area_setup_needed = TRUE;
+#else
+    new_scale = 1;
+#endif
+
+    /*
+     * This event might be spurious; some GTK setups have been known
+     * to call it when nothing at all has changed. Check if we have
+     * any reason to proceed.
+     */
+    if (!inst->drawing_area_setup_needed)
+        return;
+
+    inst->drawing_area_setup_needed = FALSE;
+    inst->scale = new_scale;
 
     {
         int backing_w = w * inst->font_width + 2*inst->window_border;
         int backing_h = h * inst->font_height + 2*inst->window_border;
+
+        backing_w *= inst->scale;
+        backing_h *= inst->scale;
 
 #ifndef NO_BACKING_PIXMAPS
         if (inst->pixmap) {
@@ -650,7 +690,7 @@ gint configure_area(GtkWidget *widget, GdkEventConfigure *event, gpointer data)
             inst->pixmap = NULL;
         }
 
-        inst->pixmap = gdk_pixmap_new(gtk_widget_get_window(widget),
+        inst->pixmap = gdk_pixmap_new(gtk_widget_get_window(inst->area),
                                       backing_w, backing_h, -1);
 #endif
 
@@ -675,11 +715,71 @@ gint configure_area(GtkWidget *widget, GdkEventConfigure *event, gpointer data)
 	term_invalidate(inst->term);
 
 #if GTK_CHECK_VERSION(2,0,0)
-    gtk_im_context_set_client_window(inst->imc, gtk_widget_get_window(widget));
+    gtk_im_context_set_client_window(
+        inst->imc, gtk_widget_get_window(inst->area));
+#endif
+}
+
+static void drawing_area_setup_simple(struct gui_data *inst)
+{
+    /*
+     * Wrapper on drawing_area_setup which fetches the width and
+     * height of the drawing area. We go directly to the inner version
+     * in the case where a new size allocation comes in (just in case
+     * GTK hasn't installed it in the normal place yet).
+     */
+#if GTK_CHECK_VERSION(2,0,0)
+    GdkRectangle alloc;
+    gtk_widget_get_allocation(inst->area, &alloc);
+#else
+    GtkAllocation alloc = inst->area->allocation;
+#endif
+    drawing_area_setup(inst, alloc.width, alloc.height);
+}
+
+static void area_realised(GtkWidget *widget, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+
+    inst->drawing_area_realised = TRUE;
+    if (inst->drawing_area_realised && inst->drawing_area_got_size &&
+        inst->drawing_area_setup_needed)
+        drawing_area_setup_simple(inst);
+}
+
+static void area_size_allocate(
+    GtkWidget *widget, GdkRectangle *alloc, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+
+    inst->drawing_area_got_size = TRUE;
+    if (inst->drawing_area_realised && inst->drawing_area_got_size)
+        drawing_area_setup(inst, alloc->width, alloc->height);
+}
+
+#if GTK_CHECK_VERSION(3,10,0)
+static void area_check_scale(struct gui_data *inst)
+{
+    if (!inst->drawing_area_setup_needed &&
+        inst->scale != gtk_widget_get_scale_factor(inst->area)) {
+        drawing_area_setup_simple(inst);
+        if (inst->term) {
+            term_invalidate(inst->term);
+            term_update(inst->term);
+        }
+    }
+}
 #endif
 
-    return TRUE;
+#if GTK_CHECK_VERSION(3,10,0)
+static gboolean area_configured(
+    GtkWidget *widget, GdkEventConfigure *event, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+    area_check_scale(inst);
+    return FALSE;
 }
+#endif
 
 #ifdef DRAW_TEXT_CAIRO
 static void cairo_setup_dctx(struct draw_ctx *dctx)
@@ -702,6 +802,16 @@ static gint draw_area(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
     struct gui_data *inst = (struct gui_data *)data;
 
+#if GTK_CHECK_VERSION(3,10,0)
+    /*
+     * This may be the first we hear of the window scale having
+     * changed, in which case we must hastily reconstruct our backing
+     * surface before we copy the wrong one into the newly resized
+     * real window.
+     */
+    area_check_scale(inst);
+#endif
+
     /*
      * GTK3 window redraw: we always expect Cairo to be enabled, so
      * that inst->surface exists, and pixmaps to be disabled, so that
@@ -710,6 +820,33 @@ static gint draw_area(GtkWidget *widget, cairo_t *cr, gpointer data)
      */
     if (inst->surface) {
         GdkRectangle dirtyrect;
+        cairo_surface_t *target_surface;
+        double orig_sx, orig_sy;
+        cairo_matrix_t m;
+
+        /*
+         * Furtle around in the Cairo setup to force the device scale
+         * back to 1, so that when we blit a collection of pixels from
+         * our backing surface into the window, they really are
+         * _pixels_ and not some confusing antialiased slightly-offset
+         * 2x2 rectangle of pixeloids.
+         *
+         * I have no idea whether GTK expects me not to mess with the
+         * device scale in the cairo_surface_t backing its window, so
+         * I carefully put it back when I've finished.
+         *
+         * In some GTK setups, the Cairo context we're given may not
+         * have a zero translation offset in its matrix, in which case
+         * we have to adjust that to compensate for the change of
+         * scale, or else the old translation offset (designed for the
+         * old scale) will be multiplied by the new scale instead and
+         * put everything in the wrong place.
+         */
+        target_surface = cairo_get_target(cr);
+        cairo_get_matrix(cr, &m);
+        cairo_surface_get_device_scale(target_surface, &orig_sx, &orig_sy);
+        cairo_surface_set_device_scale(target_surface, 1.0, 1.0);
+        cairo_translate(cr, m.x0 * (orig_sx - 1.0), m.y0 * (orig_sy - 1.0));
 
         gdk_cairo_get_clip_rectangle(cr, &dirtyrect);
 
@@ -717,6 +854,8 @@ static gint draw_area(GtkWidget *widget, cairo_t *cr, gpointer data)
         cairo_rectangle(cr, dirtyrect.x, dirtyrect.y,
                         dirtyrect.width, dirtyrect.height);
         cairo_fill(cr);
+
+        cairo_surface_set_device_scale(target_surface, orig_sx, orig_sy);
     }
 
     return TRUE;
@@ -2689,7 +2828,7 @@ void set_clipboard_atom(struct gui_data *inst, int clipboard, GdkAtom atom)
 int init_clipboard(struct gui_data *inst)
 {
     set_clipboard_atom(inst, CLIP_PRIMARY, GDK_SELECTION_PRIMARY);
-    set_clipboard_atom(inst, CLIP_CLIPBOARD, GDK_SELECTION_CLIPBOARD);
+    set_clipboard_atom(inst, CLIP_CLIPBOARD, clipboard_atom);
     return TRUE;
 }
 
@@ -2838,31 +2977,36 @@ void frontend_request_paste(void *frontend, int clipboard)
  */
 
 /* Store the data in a cut-buffer. */
-static void store_cutbuffer(char * ptr, int len)
+static void store_cutbuffer(struct gui_data *inst, char *ptr, int len)
 {
 #ifndef NOT_X_WINDOWS
-    Display *disp = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-    /* ICCCM says we must rotate the buffers before storing to buffer 0. */
-    XRotateBuffers(disp, 1);
-    XStoreBytes(disp, ptr, len);
+    if (inst->disp) {
+        /* ICCCM says we must rotate the buffers before storing to buffer 0. */
+        XRotateBuffers(inst->disp, 1);
+        XStoreBytes(inst->disp, ptr, len);
+    }
 #endif
 }
 
 /* Retrieve data from a cut-buffer.
  * Returned data needs to be freed with XFree().
  */
-static char *retrieve_cutbuffer(int *nbytes)
+static char *retrieve_cutbuffer(struct gui_data *inst, int *nbytes)
 {
 #ifndef NOT_X_WINDOWS
-    Display *disp = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-    char * ptr;
-    ptr = XFetchBytes(disp, nbytes);
+    char *ptr;
+    if (!inst->disp) {
+        *nbytes = 0;
+        return NULL;
+    }
+    ptr = XFetchBytes(inst->disp, nbytes);
     if (*nbytes <= 0 && ptr != 0) {
 	XFree(ptr);
 	ptr = 0;
     }
     return ptr;
 #else
+    *nbytes = 0;
     return NULL;
 #endif
 }
@@ -2891,7 +3035,6 @@ void write_clip(void *frontend, int clipboard,
 #ifndef NOT_X_WINDOWS
 	XTextProperty tp;
 	char *list[1];
-        Display *disp = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
 #endif
 
 	state->pasteout_data_utf8 = snewn(len*6, char);
@@ -2915,8 +3058,8 @@ void write_clip(void *frontend, int clipboard,
 	 */
 #ifndef NOT_X_WINDOWS
 	list[0] = state->pasteout_data_utf8;
-	if (Xutf8TextListToTextProperty(disp, list, 1,
-					XCompoundTextStyle, &tp) == 0) {
+	if (inst->disp && Xutf8TextListToTextProperty(
+                inst->disp, list, 1, XCompoundTextStyle, &tp) == 0) {
 	    state->pasteout_data_ctext = snewn(tp.nitems+1, char);
 	    memcpy(state->pasteout_data_ctext, tp.value, tp.nitems);
 	    state->pasteout_data_ctext_len = tp.nitems;
@@ -2950,7 +3093,7 @@ void write_clip(void *frontend, int clipboard,
 
     /* The legacy X cut buffers go with PRIMARY, not any other clipboard */
     if (state->atom == GDK_SELECTION_PRIMARY)
-        store_cutbuffer(state->pasteout_data, state->pasteout_data_len);
+        store_cutbuffer(inst, state->pasteout_data, state->pasteout_data_len);
 
     if (gtk_selection_owner_set(inst->area, state->atom,
 				inst->input_event_time)) {
@@ -3115,7 +3258,7 @@ static void selection_received(GtkWidget *widget, GtkSelectionData *seldata,
      */
     if (seldata_length <= 0) {
 #ifndef NOT_X_WINDOWS
-	text = retrieve_cutbuffer(&length);
+	text = retrieve_cutbuffer(inst, &length);
 	if (length == 0)
 	    return;
 	/* Xterm is rumoured to expect Latin-1, though I havn't checked the
@@ -3133,13 +3276,13 @@ static void selection_received(GtkWidget *widget, GtkSelectionData *seldata,
 #ifndef NOT_X_WINDOWS
             XTextProperty tp;
             int ret, count;
-            Display *disp = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
 
 	    tp.value = (unsigned char *)seldata_data;
 	    tp.encoding = (Atom) seldata_type;
 	    tp.format = gtk_selection_data_get_format(seldata);
 	    tp.nitems = seldata_length;
-	    ret = Xutf8TextPropertyToTextList(disp, &tp, &list, &count);
+	    ret = inst->disp == NULL ? -1 :
+                Xutf8TextPropertyToTextList(inst->disp, &tp, &list, &count);
 	    if (ret == 0 && count == 1) {
                 text = list[0];
                 length = strlen(list[0]);
@@ -3204,36 +3347,37 @@ void init_clipboard(struct gui_data *inst)
      * Ensure that all the cut buffers exist - according to the ICCCM,
      * we must do this before we start using cut buffers.
      */
-    unsigned char empty[] = "";
-    Display *disp = GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER0, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER1, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER2, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER3, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER4, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER5, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER6, XA_STRING, 8, PropModeAppend, empty, 0);
-    x11_ignore_error(disp, BadMatch);
-    XChangeProperty(disp, GDK_ROOT_WINDOW(),
-		    XA_CUT_BUFFER7, XA_STRING, 8, PropModeAppend, empty, 0);
+    if (inst->disp) {
+        unsigned char empty[] = "";
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER0,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER1,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER2,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER3,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER4,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER5,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER6,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+        x11_ignore_error(inst->disp, BadMatch);
+        XChangeProperty(inst->disp, GDK_ROOT_WINDOW(), XA_CUT_BUFFER7,
+                        XA_STRING, 8, PropModeAppend, empty, 0);
+    }
 #endif
 
     inst->clipstates[CLIP_PRIMARY].atom = GDK_SELECTION_PRIMARY;
-    inst->clipstates[CLIP_CLIPBOARD].atom = GDK_SELECTION_CLIPBOARD;
+    inst->clipstates[CLIP_CLIPBOARD].atom = clipboard_atom;
     init_one_clipboard(inst, CLIP_PRIMARY);
     init_one_clipboard(inst, CLIP_CLIPBOARD);
 
@@ -3344,7 +3488,7 @@ void sys_cursor(void *frontend, int x, int y)
 void do_beep(void *frontend, int mode)
 {
     if (mode == BELL_DEFAULT)
-	gdk_beep();
+        gdk_display_beep(gdk_display_get_default());
 }
 
 int char_width(Context ctx, int uc)
@@ -3382,6 +3526,7 @@ Context get_ctx(void *frontend)
          * exist, and we draw to that first, regardless of whether we
          * subsequently copy the results to inst->pixmap. */
         dctx->uctx.u.cairo.cr = cairo_create(inst->surface);
+        cairo_scale(dctx->uctx.u.cairo.cr, inst->scale, inst->scale);
         cairo_setup_dctx(dctx);
     }
 #endif
@@ -3683,9 +3828,14 @@ static void draw_stretch_after(struct draw_ctx *dctx, int x, int y,
 
 static void draw_backing_rect(struct gui_data *inst)
 {
+    int w, h;
     struct draw_ctx *dctx = get_ctx(inst);
-    int w = inst->width * inst->font_width + 2*inst->window_border;
-    int h = inst->height * inst->font_height + 2*inst->window_border;
+
+    if (!dctx)
+        return;
+
+    w = inst->width * inst->font_width + 2*inst->window_border;
+    h = inst->height * inst->font_height + 2*inst->window_border;
     draw_set_colour(dctx, 258, FALSE);
     draw_rectangle(dctx, 1, 0, 0, w, h);
     draw_update(dctx, 0, 0, w, h);
@@ -4044,10 +4194,14 @@ const char *get_x_display(void *frontend)
 }
 
 #ifndef NOT_X_WINDOWS
-long get_windowid(void *frontend)
+int get_windowid(void *frontend, long *id)
 {
     struct gui_data *inst = (struct gui_data *)frontend;
-    return (long)GDK_WINDOW_XID(gtk_widget_get_window(inst->area));
+    GdkWindow *window = gtk_widget_get_window(inst->area);
+    if (!GDK_IS_X11_WINDOW(window))
+        return FALSE;
+    *id = GDK_WINDOW_XID(window);
+    return TRUE;
 }
 #endif
 
@@ -4124,8 +4278,18 @@ char *setup_fonts_ucs(struct gui_data *inst)
         inst->fonts[i] = fonts[i];
     }
 
-    inst->font_width = inst->fonts[0]->width;
-    inst->font_height = inst->fonts[0]->height;
+    if (inst->font_width != inst->fonts[0]->width ||
+        inst->font_height != inst->fonts[0]->height) {
+
+        inst->font_width = inst->fonts[0]->width;
+        inst->font_height = inst->fonts[0]->height;
+
+        /*
+         * The font size has changed, so force the next call to
+         * drawing_area_setup to regenerate the backing surface.
+         */
+        inst->drawing_area_setup_needed = TRUE;
+    }
 
     inst->direct_to_font = init_ucs(&inst->ucsdata,
 				    conf_get_str(inst->conf, CONF_line_codepage),
@@ -4974,8 +5138,10 @@ void new_session_window(Conf *conf, const char *geometry_string)
 #if GTK_CHECK_VERSION(3,4,0)
     inst->cumulative_scroll = 0.0;
 #endif
+    inst->drawing_area_setup_needed = TRUE;
 
 #ifndef NOT_X_WINDOWS
+    inst->disp = get_x11_display();
     if (geometry_string) {
         int flags, x, y;
         unsigned int w, h;
@@ -4999,6 +5165,8 @@ void new_session_window(Conf *conf, const char *geometry_string)
         compound_text_atom = gdk_atom_intern("COMPOUND_TEXT", FALSE);
     if (!utf8_string_atom)
         utf8_string_atom = gdk_atom_intern("UTF8_STRING", FALSE);
+    if (!clipboard_atom)
+        clipboard_atom = gdk_atom_intern("CLIPBOARD", FALSE);
 
     inst->area = gtk_drawing_area_new();
     gtk_widget_set_name(GTK_WIDGET(inst->area), "drawing-area");
@@ -5028,13 +5196,11 @@ void new_session_window(Conf *conf, const char *geometry_string)
             GdkWindow *gdkwin;
             gtk_widget_realize(GTK_WIDGET(inst->window));
             gdkwin = gtk_widget_get_window(GTK_WIDGET(inst->window));
-            if (gdk_window_ensure_native(gdkwin)) {
-                Display *disp =
-                    GDK_DISPLAY_XDISPLAY(gdk_window_get_display(gdkwin));
+            if (inst->disp && gdk_window_ensure_native(gdkwin)) {
                 XClassHint *xch = XAllocClassHint();
                 xch->res_name = (char *)winclass;
                 xch->res_class = (char *)winclass;
-                XSetClassHint(disp, GDK_WINDOW_XID(gdkwin), xch);
+                XSetClassHint(inst->disp, GDK_WINDOW_XID(gdkwin), xch);
                 XFree(xch);
             }
 #endif
@@ -5153,8 +5319,14 @@ void new_session_window(Conf *conf, const char *geometry_string)
                      G_CALLBACK(focus_event), inst);
     g_signal_connect(G_OBJECT(inst->window), "focus_out_event",
                      G_CALLBACK(focus_event), inst);
+    g_signal_connect(G_OBJECT(inst->area), "realize",
+                     G_CALLBACK(area_realised), inst);
+    g_signal_connect(G_OBJECT(inst->area), "size_allocate",
+                     G_CALLBACK(area_size_allocate), inst);
+#if GTK_CHECK_VERSION(3,10,0)
     g_signal_connect(G_OBJECT(inst->area), "configure_event",
-                     G_CALLBACK(configure_area), inst);
+                     G_CALLBACK(area_configured), inst);
+#endif
 #if GTK_CHECK_VERSION(3,0,0)
     g_signal_connect(G_OBJECT(inst->area), "draw",
                      G_CALLBACK(draw_area), inst);

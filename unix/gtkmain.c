@@ -41,6 +41,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
+#include "x11misc.h"
 #endif
 
 static char *progname, **gtkargvstart;
@@ -54,8 +55,10 @@ static const char *app_name = "pterm";
 char *x_get_default(const char *key)
 {
 #ifndef NOT_X_WINDOWS
-    return XGetDefault(GDK_DISPLAY_XDISPLAY(gdk_display_get_default()),
-                       app_name, key);
+    Display *disp;
+    if ((disp = get_x11_display()) == NULL)
+        return NULL;
+    return XGetDefault(disp, app_name, key);
 #else
     return NULL;
 #endif
@@ -153,8 +156,8 @@ void launch_duplicate_session(Conf *conf)
      * into a byte stream, create a pipe, and send this byte stream
      * to the child through the pipe.
      */
-    int i, ret, sersize, size;
-    char *data;
+    int i, ret;
+    strbuf *serialised;
     char option[80];
     int pipefd[2];
 
@@ -163,35 +166,27 @@ void launch_duplicate_session(Conf *conf)
 	return;
     }
 
-    size = sersize = conf_serialised_size(conf);
-    if (use_pty_argv && pty_argv) {
+    serialised = strbuf_new();
+
+    conf_serialise(BinarySink_UPCAST(serialised), conf);
+    if (use_pty_argv && pty_argv)
 	for (i = 0; pty_argv[i]; i++)
-	    size += strlen(pty_argv[i]) + 1;
-    }
+            put_asciz(serialised, pty_argv[i]);
 
-    data = snewn(size, char);
-    conf_serialise(conf, data);
-    if (use_pty_argv && pty_argv) {
-	int p = sersize;
-	for (i = 0; pty_argv[i]; i++) {
-	    strcpy(data + p, pty_argv[i]);
-	    p += strlen(pty_argv[i]) + 1;
-	}
-	assert(p == size);
-    }
-
-    sprintf(option, "---[%d,%d]", pipefd[0], size);
+    sprintf(option, "---[%d,%d]", pipefd[0], serialised->len);
     noncloexec(pipefd[0]);
     fork_and_exec_self(pipefd[1], option, NULL);
     close(pipefd[0]);
 
     i = ret = 0;
-    while (i < size && (ret = write(pipefd[1], data + i, size - i)) > 0)
+    while (i < serialised->len &&
+           (ret = write(pipefd[1], serialised->s + i,
+                        serialised->len - i)) > 0)
 	i += ret;
     if (ret < 0)
 	perror("write to pipe");
     close(pipefd[1]);
-    sfree(data);
+    strbuf_free(serialised);
 }
 
 void launch_new_session(void)
@@ -206,8 +201,9 @@ void launch_saved_session(const char *str)
 
 int read_dupsession_data(Conf *conf, char *arg)
 {
-    int fd, i, ret, size, size_used;
+    int fd, i, ret, size;
     char *data;
+    BinarySource src[1];
 
     if (sscanf(arg, "---[%d,%d]", &fd, &size) != 2) {
 	fprintf(stderr, "%s: malformed magic argument `%s'\n", appname, arg);
@@ -227,35 +223,36 @@ int read_dupsession_data(Conf *conf, char *arg)
 	exit(1);
     }
 
-    size_used = conf_deserialise(conf, data, size);
-    if (use_pty_argv && size > size_used) {
-	int n = 0;
-	i = size_used;
-	while (i < size) {
-	    while (i < size && data[i]) i++;
-	    if (i >= size) {
-		fprintf(stderr, "%s: malformed Duplicate Session data\n",
-			appname);
-		exit(1);
-	    }
-	    i++;
-	    n++;
-	}
-	pty_argv = snewn(n+1, char *);
-	pty_argv[n] = NULL;
-	n = 0;
-	i = size_used;
-	while (i < size) {
-	    char *p = data + i;
-	    while (i < size && data[i]) i++;
-	    assert(i < size);
-	    i++;
-	    pty_argv[n++] = dupstr(p);
-	}
+    BinarySource_BARE_INIT(src, data, size);
+    if (!conf_deserialise(conf, src)) {
+        fprintf(stderr, "%s: malformed Duplicate Session data\n", appname);
+        exit(1);
+    }
+    if (use_pty_argv) {
+	int pty_argc = 0;
+        size_t argv_startpos = src->pos;
+
+        while (get_asciz(src), !get_err(src))
+            pty_argc++;
+
+        src->err = BSE_NO_ERROR;
+
+        if (pty_argc > 0) {
+            src->pos = argv_startpos;
+
+            pty_argv = snewn(pty_argc + 1, char *);
+            pty_argv[pty_argc] = NULL;
+            for (i = 0; i < pty_argc; i++)
+                pty_argv[i] = dupstr(get_asciz(src));
+        }
+    }
+
+    if (get_err(src) || get_avail(src) > 0) {
+        fprintf(stderr, "%s: malformed Duplicate Session data\n", appname);
+        exit(1);
     }
 
     sfree(data);
-
     return 0;
 }
 

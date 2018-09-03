@@ -26,6 +26,21 @@ void request_callback_notifications(toplevel_callback_notify_fn_t fn,
     frontend = fr;
 }
 
+static void run_idempotent_callback(void *ctx)
+{
+    struct IdempotentCallback *ic = (struct IdempotentCallback *)ctx;
+    ic->queued = FALSE;
+    ic->fn(ic->ctx);
+}
+
+void queue_idempotent_callback(struct IdempotentCallback *ic)
+{
+    if (ic->queued)
+        return;
+    ic->queued = TRUE;
+    queue_toplevel_callback(run_idempotent_callback, ic);
+}
+
 void delete_callbacks_for_context(void *ctx)
 {
     struct callback *newhead, *newtail;
@@ -34,7 +49,9 @@ void delete_callbacks_for_context(void *ctx)
     while (cbhead) {
         struct callback *cb = cbhead;
         cbhead = cbhead->next;
-        if (cb->ctx == ctx) {
+        if (cb->ctx == ctx ||
+            (cb->fn == run_idempotent_callback &&
+             ((struct IdempotentCallback *)cb->ctx)->ctx == ctx)) {
             sfree(cb);
         } else {
             if (!newhead)
@@ -80,8 +97,10 @@ void queue_toplevel_callback(toplevel_callback_fn_t fn, void *ctx)
     cb->next = NULL;
 }
 
-void run_toplevel_callbacks(void)
+int run_toplevel_callbacks(void)
 {
+    int done_something = FALSE;
+
     if (cbhead) {
         /*
          * Transfer the head callback into cbcurr to indicate that
@@ -100,7 +119,10 @@ void run_toplevel_callbacks(void)
         cbcurr->fn(cbcurr->ctx);
         sfree(cbcurr);
         cbcurr = NULL;
+
+        done_something = TRUE;
     }
+    return done_something;
 }
 
 int toplevel_callback_pending(void)

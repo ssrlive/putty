@@ -93,7 +93,7 @@ FontSpec *platform_default_fontspec(const char *name) { return fontspec_new("");
 Filename *platform_default_filename(const char *name) { return filename_from_str(""); }
 char *x_get_default(const char *key) { return NULL; }
 void log_eventlog(void *handle, const char *event) {}
-int from_backend(void *frontend, int is_stderr, const char *data, int datalen)
+int from_backend(void *frontend, int is_stderr, const void *data, int datalen)
 { assert(!"only here to satisfy notional call from backend_socket_log"); }
 
 /*
@@ -108,7 +108,7 @@ static void usage(void)
     printf("       pageant -a [key files]\n");
     printf("       pageant -d [key identifiers]\n");
     printf("       pageant --public [key identifiers]\n");
-    printf("       pageant --public-openssh [key identifiers]\n");
+    printf("       pageant ( --public-openssh | -L ) [key identifiers]\n");
     printf("       pageant -l\n");
     printf("       pageant -D\n");
     printf("Lifetime options, for running Pageant as an agent:\n");
@@ -121,12 +121,15 @@ static void usage(void)
     printf("  -a           add key(s) to the existing agent\n");
     printf("  -l           list currently loaded key fingerprints and comments\n");
     printf("  --public     print public keys in RFC 4716 format\n");
-    printf("  --public-openssh   print public keys in OpenSSH format\n");
+    printf("  --public-openssh, -L   print public keys in OpenSSH format\n");
     printf("  -d           delete key(s) from the agent\n");
     printf("  -D           delete all keys from the agent\n");
     printf("Other options:\n");
     printf("  -v           verbose mode (in agent mode)\n");
     printf("  -s -c        force POSIX or C shell syntax (in agent mode)\n");
+    printf("  --tty-prompt force tty-based passphrase prompt (in -a mode)\n");
+    printf("  --gui-prompt force GUI-based passphrase prompt (in -a mode)\n");
+    printf("  --askpass <prompt>   behave like a standalone askpass program\n");
     exit(1);
 }
 
@@ -153,7 +156,8 @@ static int time_to_die = FALSE;
  * used, because in LIFE_X11 mode we connect to the X server using a
  * straightforward Socket and don't try to create an ersatz SSH
  * forwarding too. */
-int sshfwd_write(struct ssh_channel *c, char *data, int len) { return 0; }
+int sshfwd_write(struct ssh_channel *c, const void *data, int len)
+{ return 0; }
 void sshfwd_write_eof(struct ssh_channel *c) { }
 void sshfwd_unclean_close(struct ssh_channel *c, const char *err) { }
 void sshfwd_unthrottle(struct ssh_channel *c, int bufsize) {}
@@ -181,7 +185,7 @@ static void x11_closing(Plug plug, const char *error_msg, int error_code,
     time_to_die = TRUE;
 }
 struct X11Connection {
-    const struct plug_function_table *fn;
+    const Plug_vtable *plugvt;
 };
 
 char *socketname;
@@ -337,49 +341,75 @@ enum {
     LIFE_UNSPEC, LIFE_X11, LIFE_TTY, LIFE_DEBUG, LIFE_PERM, LIFE_EXEC
 } life = LIFE_UNSPEC;
 const char *display = NULL;
+enum {
+    PROMPT_UNSPEC, PROMPT_TTY, PROMPT_GUI
+} prompt_type = PROMPT_UNSPEC;
 
-static char *askpass(const char *comment)
+static char *askpass_tty(const char *prompt)
 {
-    if (have_controlling_tty()) {
-        int ret;
-        prompts_t *p = new_prompts(NULL);
-        p->to_server = FALSE;
-        p->name = dupstr("Pageant passphrase prompt");
-        add_prompt(p,
-                   dupprintf("Enter passphrase to load key '%s': ", comment),
-                   FALSE);
-        ret = console_get_userpass_input(p, NULL, 0);
-        assert(ret >= 0);
+    int ret;
+    prompts_t *p = new_prompts(NULL);
+    p->to_server = FALSE;
+    p->name = dupstr("Pageant passphrase prompt");
+    add_prompt(p, dupcat(prompt, ": ", (const char *)NULL), FALSE);
+    ret = console_get_userpass_input(p);
+    assert(ret >= 0);
 
-        if (!ret) {
-            perror("pageant: unable to read passphrase");
-            free_prompts(p);
-            return NULL;
-        } else {
-            char *passphrase = dupstr(p->prompts[0]->result);
-            free_prompts(p);
-            return passphrase;
-        }
-    } else if (display) {
-        char *prompt, *passphrase;
-        int success;
-
-        /* in gtkask.c */
-        char *gtk_askpass_main(const char *display, const char *wintitle,
-                               const char *prompt, int *success);
-
-        prompt = dupprintf("Enter passphrase to load key '%s': ", comment);
-        passphrase = gtk_askpass_main(display,
-                                      "Pageant passphrase prompt",
-                                      prompt, &success);
-        sfree(prompt);
-        if (!success) {
-            /* return value is error message */
-            fprintf(stderr, "%s\n", passphrase);
-            sfree(passphrase);
-            passphrase = NULL;
-        }
+    if (!ret) {
+        perror("pageant: unable to read passphrase");
+        free_prompts(p);
+        return NULL;
+    } else {
+        char *passphrase = dupstr(p->prompts[0]->result);
+        free_prompts(p);
         return passphrase;
+    }
+}
+
+static char *askpass_gui(const char *prompt)
+{
+    char *passphrase;
+    int success;
+
+    /* in gtkask.c */
+    char *gtk_askpass_main(const char *display, const char *wintitle,
+                           const char *prompt, int *success);
+
+    passphrase = gtk_askpass_main(
+        display, "Pageant passphrase prompt", prompt, &success);
+    if (!success) {
+        /* return value is error message */
+        fprintf(stderr, "%s\n", passphrase);
+        sfree(passphrase);
+        passphrase = NULL;
+    }
+    return passphrase;
+}
+
+static char *askpass(const char *prompt)
+{
+    if (prompt_type == PROMPT_TTY) {
+        if (!have_controlling_tty()) {
+            fprintf(stderr, "no controlling terminal available "
+                    "for passphrase prompt\n");
+            return NULL;
+        }
+        return askpass_tty(prompt);
+    }
+
+    if (prompt_type == PROMPT_GUI) {
+        if (!display) {
+            fprintf(stderr, "no graphical display available "
+                    "for passphrase prompt\n");
+            return NULL;
+        }
+        return askpass_gui(prompt);
+    }
+
+    if (have_controlling_tty()) {
+        return askpass_tty(prompt);
+    } else if (display) {
+        return askpass_gui(prompt);
     } else {
         fprintf(stderr, "no way to read a passphrase without tty or "
                 "X display\n");
@@ -411,8 +441,11 @@ static int unix_add_keyfile(const char *filename_str)
      * And now try prompting for a passphrase.
      */
     while (1) {
-        char *passphrase = askpass(err);
+        char *prompt = dupprintf(
+            "Enter passphrase to load key '%s'", err);
+        char *passphrase = askpass(prompt);
         sfree(err);
+        sfree(prompt);
         err = NULL;
         if (!passphrase)
             break;
@@ -524,8 +557,11 @@ struct pageant_pubkey *find_key(const char *string, char **retstr)
             keytype == SSH_KEYTYPE_SSH1_PUBLIC) {
             const char *error;
 
-            if (!rsakey_pubblob(fn, &key_in.blob, &key_in.bloblen,
-                                NULL, &error)) {
+            key_in.blob = strbuf_new();
+            if (!rsa_ssh1_loadpub(fn, BinarySink_UPCAST(key_in.blob),
+                                  NULL, &error)) {
+                strbuf_free(key_in.blob);
+                key_in.blob = NULL;
                 if (file_errors) {
                     *retstr = dupprintf("unable to load file '%s': %s",
                                         string, error);
@@ -541,7 +577,8 @@ struct pageant_pubkey *find_key(const char *string, char **retstr)
                 key_in.ssh_version = 1;
                 key_in.comment = NULL;
                 key_ret = pageant_pubkey_copy(&key_in);
-                sfree(key_in.blob);
+                strbuf_free(key_in.blob);
+                key_in.blob = NULL;
                 filename_free(fn);
                 return key_ret;
             }
@@ -550,9 +587,11 @@ struct pageant_pubkey *find_key(const char *string, char **retstr)
                    keytype == SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH) {
             const char *error;
 
-            if ((key_in.blob = ssh2_userkey_loadpub(fn, NULL,
-                                                    &key_in.bloblen,
-                                                    NULL, &error)) == NULL) {
+            key_in.blob = strbuf_new();
+            if (!ssh2_userkey_loadpub(fn, NULL, BinarySink_UPCAST(key_in.blob),
+                                     NULL, &error)) {
+                strbuf_free(key_in.blob);
+                key_in.blob = NULL;
                 if (file_errors) {
                     *retstr = dupprintf("unable to load file '%s': %s",
                                         string, error);
@@ -568,7 +607,8 @@ struct pageant_pubkey *find_key(const char *string, char **retstr)
                 key_in.ssh_version = 2;
                 key_in.comment = NULL;
                 key_ret = pageant_pubkey_copy(&key_in);
-                sfree(key_in.blob);
+                strbuf_free(key_in.blob);
+                key_in.blob = NULL;
                 filename_free(fn);
                 return key_ret;
             }
@@ -661,14 +701,19 @@ void run_client(void)
                 FILE *fp = stdout;     /* FIXME: add a -o option? */
 
                 if (key->ssh_version == 1) {
+                    BinarySource src[1];
                     struct RSAKey rkey;
+
+                    BinarySource_BARE_INIT(src, key->blob->u, key->blob->len);
                     memset(&rkey, 0, sizeof(rkey));
                     rkey.comment = dupstr(key->comment);
-                    makekey(key->blob, key->bloblen, &rkey, NULL, 0);
+                    get_rsa_ssh1_pub(src, &rkey, RSA_SSH1_EXPONENT_FIRST);
                     ssh1_write_pubkey(fp, &rkey);
                     freersakey(&rkey);
                 } else {
-                    ssh2_write_pubkey(fp, key->comment, key->blob,key->bloblen,
+                    ssh2_write_pubkey(fp, key->comment,
+                                      key->blob->u,
+                                      key->blob->len,
                                       (act->action == KEYACT_CLIENT_PUBLIC ?
                                        SSH_KEYTYPE_SSH2_PUBLIC_RFC4716 :
                                        SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH));
@@ -692,11 +737,20 @@ void run_client(void)
         exit(1);
 }
 
+static const Plug_vtable X11Connection_plugvt = {
+    x11_log,
+    x11_closing,
+    x11_receive,
+    x11_sent,
+    NULL
+};
+
 void run_agent(void)
 {
     const char *err;
     char *username, *socketdir;
     struct pageant_listen_state *pl;
+    Plug pl_plug;
     Socket sock;
     unsigned long now;
     int *fdlist;
@@ -735,8 +789,8 @@ void run_agent(void)
         exit(1);
     }
     socketname = dupprintf("%s/pageant.%d", socketdir, (int)getpid());
-    pl = pageant_listener_new();
-    sock = new_unix_listener(unix_sock_addr(socketname), (Plug)pl);
+    pl = pageant_listener_new(&pl_plug);
+    sock = new_unix_listener(unix_sock_addr(socketname), pl_plug);
     if ((err = sk_socket_error(sock)) != NULL) {
         fprintf(stderr, "pageant: %s: %s\n", socketname, err);
         exit(1);
@@ -757,14 +811,6 @@ void run_agent(void)
         Socket s;
         struct X11Connection *conn;
 
-        static const struct plug_function_table fn_table = {
-            x11_log,
-            x11_closing,
-            x11_receive,
-            x11_sent,
-            NULL
-        };
-
         if (!display) {
             fprintf(stderr, "pageant: no DISPLAY for -X mode\n");
             exit(1);
@@ -772,10 +818,10 @@ void run_agent(void)
         disp = x11_setup_display(display, conf);
 
         conn = snew(struct X11Connection);
-        conn->fn = &fn_table;
+        conn->plugvt = &X11Connection_plugvt;
         s = new_connection(sk_addr_dup(disp->addr),
                            disp->realhost, disp->port,
-                           0, 1, 0, 0, (Plug)conn, conf);
+                           0, 1, 0, 0, &conn->plugvt, conf);
         if ((err = sk_socket_error(s)) != NULL) {
             fprintf(stderr, "pageant: unable to connect to X server: %s", err);
             exit(1);
@@ -977,6 +1023,7 @@ int main(int argc, char **argv)
 {
     int doing_opts = TRUE;
     keyact curr_keyact = KEYACT_AGENT_LOAD;
+    const char *standalone_askpass_prompt = NULL;
 
     /*
      * Process the command line.
@@ -1005,7 +1052,7 @@ int main(int argc, char **argv)
                 add_keyact(KEYACT_CLIENT_LIST, NULL);
             } else if (!strcmp(p, "--public")) {
                 curr_keyact = KEYACT_CLIENT_PUBLIC;
-            } else if (!strcmp(p, "--public-openssh")) {
+            } else if (!strcmp(p, "--public-openssh") || !strcmp(p, "-L")) {
                 curr_keyact = KEYACT_CLIENT_PUBLIC_OPENSSH;
             } else if (!strcmp(p, "-X")) {
                 life = LIFE_X11;
@@ -1024,6 +1071,18 @@ int main(int argc, char **argv)
                 } else {
                     fprintf(stderr, "pageant: expected a command "
                             "after --exec\n");
+                    exit(1);
+                }
+            } else if (!strcmp(p, "--tty-prompt")) {
+                prompt_type = PROMPT_TTY;
+            } else if (!strcmp(p, "--gui-prompt")) {
+                prompt_type = PROMPT_GUI;
+            } else if (!strcmp(p, "--askpass")) {
+                if (--argc > 0) {
+                    standalone_askpass_prompt = *++argv;
+                } else {
+                    fprintf(stderr, "pageant: expected a prompt message "
+                            "after --askpass\n");
                     exit(1);
                 }
             } else if (!strcmp(p, "--")) {
@@ -1045,6 +1104,27 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    if (!display) {
+        display = getenv("DISPLAY");
+        if (display && !*display)
+            display = NULL;
+    }
+
+    /*
+     * Deal with standalone-askpass mode.
+     */
+    if (standalone_askpass_prompt) {
+        char *passphrase = askpass(standalone_askpass_prompt);
+
+        if (!passphrase)
+            return 1;
+
+        puts(passphrase);
+        smemclr(passphrase, strlen(passphrase));
+        sfree(passphrase);
+        return 0;
+    }
+
     /*
      * Block SIGPIPE, so that we'll get EPIPE individually on
      * particular network connections that go wrong.
@@ -1053,12 +1133,6 @@ int main(int argc, char **argv)
 
     sk_init();
     uxsel_init();
-
-    if (!display) {
-        display = getenv("DISPLAY");
-        if (display && !*display)
-            display = NULL;
-    }
 
     /*
      * Now distinguish our two main running modes. Either we're
