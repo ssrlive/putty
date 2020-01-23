@@ -16,7 +16,7 @@
  */
 #ifdef STATIC_GSSAPI
 #include <gssapi/gssapi.h>
-typedef gss_OID const_gss_OID;	       /* for our prototypes below */
+typedef gss_OID const_gss_OID;         /* for our prototypes below */
 #else /* STATIC_GSSAPI */
 
 /*******************************************************************************
@@ -24,7 +24,7 @@ typedef gss_OID const_gss_OID;	       /* for our prototypes below */
  ******************************************************************************/
 
 /* GSSAPI Type Definitions */
-typedef uint32 OM_uint32;
+typedef uint32_t OM_uint32;
 
 typedef struct gss_OID_desc_struct {
     OM_uint32 length;

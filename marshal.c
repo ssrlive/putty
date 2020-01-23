@@ -4,11 +4,15 @@
 
 #include "marshal.h"
 #include "misc.h"
-#include "int64.h"
 
 void BinarySink_put_data(BinarySink *bs, const void *data, size_t len)
 {
     bs->write(bs, data, len);
+}
+
+void BinarySink_put_datapl(BinarySink *bs, ptrlen pl)
+{
+    BinarySink_put_data(bs, pl.ptr, pl.len);
 }
 
 void BinarySink_put_padding(BinarySink *bs, size_t len, unsigned char padbyte)
@@ -27,7 +31,7 @@ void BinarySink_put_byte(BinarySink *bs, unsigned char val)
     bs->write(bs, &val, 1);
 }
 
-void BinarySink_put_bool(BinarySink *bs, int val)
+void BinarySink_put_bool(BinarySink *bs, bool val)
 {
     unsigned char cval = val ? 1 : 0;
     bs->write(bs, &cval, 1);
@@ -47,10 +51,11 @@ void BinarySink_put_uint32(BinarySink *bs, unsigned long val)
     bs->write(bs, data, sizeof(data));
 }
 
-void BinarySink_put_uint64(BinarySink *bs, uint64 val)
+void BinarySink_put_uint64(BinarySink *bs, uint64_t val)
 {
-    BinarySink_put_uint32(bs, val.hi);
-    BinarySink_put_uint32(bs, val.lo);
+    unsigned char data[8];
+    PUT_64BIT_MSB_FIRST(data, val);
+    bs->write(bs, data, sizeof(data));
 }
 
 void BinarySink_put_string(BinarySink *bs, const void *data, size_t len)
@@ -84,28 +89,28 @@ void BinarySink_put_asciz(BinarySink *bs, const char *str)
     bs->write(bs, str, strlen(str) + 1);
 }
 
-int BinarySink_put_pstring(BinarySink *bs, const char *str)
+bool BinarySink_put_pstring(BinarySink *bs, const char *str)
 {
     size_t len = strlen(str);
     if (len > 255)
-        return FALSE; /* can't write a Pascal-style string this long */
+        return false; /* can't write a Pascal-style string this long */
     BinarySink_put_byte(bs, len);
     bs->write(bs, str, len);
-    return TRUE;
+    return true;
 }
 
 /* ---------------------------------------------------------------------- */
 
-static int BinarySource_data_avail(BinarySource *src, size_t wanted)
+static bool BinarySource_data_avail(BinarySource *src, size_t wanted)
 {
     if (src->err)
-        return FALSE;
+        return false;
 
     if (wanted <= src->len - src->pos)
-        return TRUE;
+        return true;
 
     src->err = BSE_OUT_OF_DATA;
-    return FALSE;
+    return false;
 }
 
 #define avail(wanted) BinarySource_data_avail(src, wanted)
@@ -134,12 +139,12 @@ unsigned char BinarySource_get_byte(BinarySource *src)
     return *ucp;
 }
 
-int BinarySource_get_bool(BinarySource *src)
+bool BinarySource_get_bool(BinarySource *src)
 {
     const unsigned char *ucp;
 
     if (!avail(1))
-        return 0;
+        return false;
 
     ucp = consume(1);
     return *ucp != 0;
@@ -167,20 +172,15 @@ unsigned long BinarySource_get_uint32(BinarySource *src)
     return GET_32BIT_MSB_FIRST(ucp);
 }
 
-uint64 BinarySource_get_uint64(BinarySource *src)
+uint64_t BinarySource_get_uint64(BinarySource *src)
 {
     const unsigned char *ucp;
-    uint64 toret;
 
-    if (!avail(8)) {
-        toret.hi = toret.lo = 0;
-        return toret;
-    }
+    if (!avail(8))
+        return 0;
 
     ucp = consume(8);
-    toret.hi = GET_32BIT_MSB_FIRST(ucp);
-    toret.lo = GET_32BIT_MSB_FIRST(ucp + 4);
-    return toret;
+    return GET_64BIT_MSB_FIRST(ucp);
 }
 
 ptrlen BinarySource_get_string(BinarySource *src)
@@ -218,6 +218,54 @@ const char *BinarySource_get_asciz(BinarySource *src)
     return start;
 }
 
+static ptrlen BinarySource_get_chars_internal(
+    BinarySource *src, const char *set, bool include)
+{
+    const char *end;
+    const char *start = here;
+    while (avail(1)) {
+        bool present = NULL != strchr(set, *(const char *)consume(0));
+        if (present != include)
+            break;
+        (void) consume(1);
+    }
+    end = here;
+    return make_ptrlen(start, end - start);
+}
+
+ptrlen BinarySource_get_chars(BinarySource *src, const char *include_set)
+{
+    return BinarySource_get_chars_internal(src, include_set, true);
+}
+
+ptrlen BinarySource_get_nonchars(BinarySource *src, const char *exclude_set)
+{
+    return BinarySource_get_chars_internal(src, exclude_set, false);
+}
+
+ptrlen BinarySource_get_chomped_line(BinarySource *src)
+{
+    const char *start, *end;
+
+    if (src->err)
+        return make_ptrlen(here, 0);
+
+    start = here;
+    end = memchr(start, '\n', src->len - src->pos);
+    if (end)
+        advance(end + 1 - start);
+    else
+        advance(src->len - src->pos);
+    end = here;
+
+    if (end > start && end[-1] == '\n')
+        end--;
+    if (end > start && end[-1] == '\r')
+        end--;
+
+    return make_ptrlen(start, end - start);
+}
+
 ptrlen BinarySource_get_pstring(BinarySource *src)
 {
     const unsigned char *ucp;
@@ -233,4 +281,39 @@ ptrlen BinarySource_get_pstring(BinarySource *src)
         return make_ptrlen("", 0);
 
     return make_ptrlen(consume(len), len);
+}
+
+void BinarySource_REWIND_TO__(BinarySource *src, size_t pos)
+{
+    if (pos <= src->len) {
+        src->pos = pos;
+        src->err = BSE_NO_ERROR;    /* clear any existing error */
+    } else {
+        src->pos = src->len;
+        src->err = BSE_OUT_OF_DATA; /* new error if we rewind out of range */
+    }
+}
+
+static void stdio_sink_write(BinarySink *bs, const void *data, size_t len)
+{
+    stdio_sink *sink = BinarySink_DOWNCAST(bs, stdio_sink);
+    fwrite(data, 1, len, sink->fp);
+}
+
+void stdio_sink_init(stdio_sink *sink, FILE *fp)
+{
+    sink->fp = fp;
+    BinarySink_INIT(sink, stdio_sink_write);
+}
+
+static void bufchain_sink_write(BinarySink *bs, const void *data, size_t len)
+{
+    bufchain_sink *sink = BinarySink_DOWNCAST(bs, bufchain_sink);
+    bufchain_add(sink->ch, data, len);
+}
+
+void bufchain_sink_init(bufchain_sink *sink, bufchain *ch)
+{
+    sink->ch = ch;
+    BinarySink_INIT(sink, bufchain_sink_write);
 }

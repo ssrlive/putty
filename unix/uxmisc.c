@@ -58,12 +58,12 @@ const char *filename_to_str(const Filename *fn)
     return fn->path;
 }
 
-int filename_equal(const Filename *f1, const Filename *f2)
+bool filename_equal(const Filename *f1, const Filename *f2)
 {
     return !strcmp(f1->path, f2->path);
 }
 
-int filename_is_null(const Filename *fn)
+bool filename_is_null(const Filename *fn)
 {
     return !fn->path[0];
 }
@@ -96,7 +96,7 @@ static FILE *debug_fp = NULL;
 void dputs(const char *buf)
 {
     if (!debug_fp) {
-	debug_fp = fopen("debug.log", "w");
+        debug_fp = fopen("debug.log", "w");
     }
 
     if (write(1, buf, strlen(buf)) < 0) {} /* 'error check' to placate gcc */
@@ -119,29 +119,33 @@ char *get_username(void)
      * coping correctly with people who have su'ed.
      */
     user = getlogin();
+#if HAVE_SETPWENT
     setpwent();
+#endif
     if (user)
-	p = getpwnam(user);
+        p = getpwnam(user);
     else
-	p = NULL;
+        p = NULL;
     if (p && p->pw_uid == uid) {
-	/*
-	 * The result of getlogin() really does correspond to
-	 * our uid. Fine.
-	 */
-	ret = user;
+        /*
+         * The result of getlogin() really does correspond to
+         * our uid. Fine.
+         */
+        ret = user;
     } else {
-	/*
-	 * If that didn't work, for whatever reason, we'll do
-	 * the simpler version: look up our uid in the password
-	 * file and map it straight to a name.
-	 */
-	p = getpwuid(uid);
-	if (!p)
-	    return NULL;
-	ret = p->pw_name;
+        /*
+         * If that didn't work, for whatever reason, we'll do
+         * the simpler version: look up our uid in the password
+         * file and map it straight to a name.
+         */
+        p = getpwuid(uid);
+        if (!p)
+            return NULL;
+        ret = p->pw_name;
     }
+#if HAVE_ENDPWENT
     endpwent();
+#endif
 
     return dupstr(ret);
 }
@@ -154,16 +158,16 @@ char *get_username(void)
 void pgp_fingerprints(void)
 {
     fputs("These are the fingerprints of the PuTTY PGP Master Keys. They can\n"
-	  "be used to establish a trust path from this executable to another\n"
-	  "one. See the manual for more information.\n"
-	  "(Note: these fingerprints have nothing to do with SSH!)\n"
-	  "\n"
-	  "PuTTY Master Key as of " PGP_MASTER_KEY_YEAR
+          "be used to establish a trust path from this executable to another\n"
+          "one. See the manual for more information.\n"
+          "(Note: these fingerprints have nothing to do with SSH!)\n"
+          "\n"
+          "PuTTY Master Key as of " PGP_MASTER_KEY_YEAR
           " (" PGP_MASTER_KEY_DETAILS "):\n"
-	  "  " PGP_MASTER_KEY_FP "\n\n"
-	  "Previous Master Key (" PGP_PREV_MASTER_KEY_YEAR
+          "  " PGP_MASTER_KEY_FP "\n\n"
+          "Previous Master Key (" PGP_PREV_MASTER_KEY_YEAR
           ", " PGP_PREV_MASTER_KEY_DETAILS "):\n"
-	  "  " PGP_PREV_MASTER_KEY_FP "\n", stdout);
+          "  " PGP_PREV_MASTER_KEY_FP "\n", stdout);
 }
 
 /*
@@ -202,7 +206,7 @@ void noncloexec(int fd) {
         exit(1);
     }
 }
-int nonblock(int fd) {
+bool nonblock(int fd) {
     int fdflags;
 
     fdflags = fcntl(fd, F_GETFL);
@@ -217,7 +221,7 @@ int nonblock(int fd) {
 
     return fdflags & O_NONBLOCK;
 }
-int no_nonblock(int fd) {
+bool no_nonblock(int fd) {
     int fdflags;
 
     fdflags = fcntl(fd, F_GETFL);
@@ -233,18 +237,18 @@ int no_nonblock(int fd) {
     return fdflags & O_NONBLOCK;
 }
 
-FILE *f_open(const Filename *filename, char const *mode, int is_private)
+FILE *f_open(const Filename *filename, char const *mode, bool is_private)
 {
     if (!is_private) {
-	return fopen(filename->path, mode);
+        return fopen(filename->path, mode);
     } else {
-	int fd;
-	assert(mode[0] == 'w');	       /* is_private is meaningless for read,
-					  and tricky for append */
-	fd = open(filename->path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-	if (fd < 0)
-	    return NULL;
-	return fdopen(fd, mode);
+        int fd;
+        assert(mode[0] == 'w');        /* is_private is meaningless for read,
+                                          and tricky for append */
+        fd = open(filename->path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+        if (fd < 0)
+            return NULL;
+        return fdopen(fd, mode);
     }
 }
 
@@ -330,7 +334,7 @@ char *make_dir_path(const char *path, mode_t mode)
     }
 }
 
-int open_for_write_would_lose_data(const Filename *fn)
+bool open_for_write_would_lose_data(const Filename *fn)
 {
     struct stat st;
 
@@ -343,7 +347,7 @@ int open_for_write_would_lose_data(const Filename *fn)
          * open the file for writing and report _that_ error, which is
          * likely to be more to the point.
          */
-        return FALSE;
+        return false;
     }
 
     /*
@@ -360,8 +364,8 @@ int open_for_write_would_lose_data(const Filename *fn)
      * information.)
      */
     if (S_ISREG(st.st_mode) && st.st_size > 0) {
-        return TRUE;
+        return true;
     }
 
-    return FALSE;
+    return false;
 }

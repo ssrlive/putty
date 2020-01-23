@@ -10,14 +10,14 @@
 #include "ssh.h"
 
 int ssh2_censor_packet(
-    const PacketLogSettings *pls, int type, int sender_is_client,
+    const PacketLogSettings *pls, int type, bool sender_is_client,
     ptrlen pkt, logblank_t *blanks)
 {
     int nblanks = 0;
     ptrlen str;
     BinarySource src[1];
 
-    BinarySource_BARE_INIT(src, pkt.ptr, pkt.len);
+    BinarySource_BARE_INIT_PL(src, pkt);
 
     if (pls->omit_data &&
         (type == SSH2_MSG_CHANNEL_DATA ||

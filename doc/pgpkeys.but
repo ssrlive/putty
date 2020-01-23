@@ -1,7 +1,5 @@
 \A{pgpkeys} PuTTY download keys and signatures
 
-\cfg{winhelp-topic}{pgpfingerprints}
-
 \I{verifying new versions}We create \i{GPG signatures} for all the PuTTY
 files distributed from our web site, so that users can be confident
 that the files have not been tampered with. Here we identify
@@ -15,6 +13,11 @@ material (usually accessed via the \i\c{-pgpfp} command-line
 option), such that if you have an executable you trust, you can use
 it to establish a trust path, for instance to a newer version
 downloaded from the Internet.
+
+As of release 0.67, the Windows executables and installer also contain
+built-in signatures that are automatically verified by Windows' own
+mechanism (\q{\i{Authenticode}}). The keys used for that are different,
+and are not covered here.
 
 (Note that none of the keys, signatures, etc mentioned here have
 anything to do with keys used with SSH - they are purely for verifying

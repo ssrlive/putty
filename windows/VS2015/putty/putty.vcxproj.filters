@@ -47,9 +47,6 @@
     <ClCompile Include="..\..\..\ldisc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\ldiscucs.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\logging.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -99,9 +96,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\sshblowf.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\sshbn.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\sshccp.c">

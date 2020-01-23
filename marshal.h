@@ -3,6 +3,8 @@
 
 #include "defs.h"
 
+#include <stdio.h>
+
 /*
  * A sort of 'abstract base class' or 'interface' or 'trait' which is
  * the common feature of all types that want to accept data formatted
@@ -24,6 +26,23 @@ struct BinarySink {
 #define BinarySink_INIT(obj, writefn) \
     ((obj)->binarysink_->write = (writefn), \
      (obj)->binarysink_->binarysink_ = (obj)->binarysink_)
+
+/*
+ * To define a larger structure type as a valid BinarySink in such a
+ * way that it will delegate the write method to some other object,
+ * put 'BinarySink_DELEGATE_IMPLEMENTATION' in its declaration, and
+ * when an instance is set up, use 'BinarySink_DELEGATE_INIT' to point
+ * at the object it wants to delegate to.
+ *
+ * In such a delegated structure, you might sometimes want to have the
+ * delegation stop being valid (e.g. it might be delegating to an
+ * object that only sometimes exists). You can null out the delegate
+ * pointer using BinarySink_DELEGATE_CLEAR.
+ */
+#define BinarySink_DELEGATE_IMPLEMENTATION BinarySink *binarysink_
+#define BinarySink_DELEGATE_INIT(obj, othersink) \
+    ((obj)->binarysink_ = BinarySink_UPCAST(othersink))
+#define BinarySink_DELEGATE_CLEAR(obj) ((obj)->binarysink_ = NULL)
 
 /*
  * The implementing type's write function will want to downcast its
@@ -65,8 +84,7 @@ struct BinarySink {
  * first parameter of any of these put_* macros.
  */
 
-/* Basic big-endian integer types. uint64 is the structure type
- * defined in int64.h, not the C99 built-in type. */
+/* Basic big-endian integer types. */
 #define put_byte(bs, val) \
     BinarySink_put_byte(BinarySink_UPCAST(bs), val)
 #define put_uint16(bs, val) \
@@ -118,6 +136,8 @@ struct BinarySink {
  * rest of these macros. */
 #define put_data(bs, val, len) \
     BinarySink_put_data(BinarySink_UPCAST(bs), val, len)
+#define put_datapl(bs, pl) \
+    BinarySink_put_datapl(BinarySink_UPCAST(bs), pl)
 
 /*
  * The underlying real C functions that implement most of those
@@ -130,18 +150,22 @@ struct BinarySink {
  * declaration(s) of their other parameter type(s) are in scope.
  */
 void BinarySink_put_data(BinarySink *, const void *data, size_t len);
+void BinarySink_put_datapl(BinarySink *, ptrlen);
 void BinarySink_put_padding(BinarySink *, size_t len, unsigned char padbyte);
 void BinarySink_put_byte(BinarySink *, unsigned char);
-void BinarySink_put_bool(BinarySink *, int);
+void BinarySink_put_bool(BinarySink *, bool);
 void BinarySink_put_uint16(BinarySink *, unsigned long);
 void BinarySink_put_uint32(BinarySink *, unsigned long);
+void BinarySink_put_uint64(BinarySink *, uint64_t);
 void BinarySink_put_string(BinarySink *, const void *data, size_t len);
 void BinarySink_put_stringpl(BinarySink *, ptrlen);
 void BinarySink_put_stringz(BinarySink *, const char *str);
 struct strbuf;
 void BinarySink_put_stringsb(BinarySink *, struct strbuf *);
 void BinarySink_put_asciz(BinarySink *, const char *str);
-int BinarySink_put_pstring(BinarySink *, const char *str);
+bool BinarySink_put_pstring(BinarySink *, const char *str);
+void BinarySink_put_mp_ssh1(BinarySink *bs, mp_int *x);
+void BinarySink_put_mp_ssh2(BinarySink *bs, mp_int *x);
 
 /* ---------------------------------------------------------------------- */
 
@@ -184,7 +208,7 @@ struct BinarySource {
      * types.
      *
      * If the usual return value is dynamically allocated (e.g. a
-     * Bignum, or a normal C 'char *' string), then the error value is
+     * bignum, or a normal C 'char *' string), then the error value is
      * also dynamic in the same way. So you have to free exactly the
      * same set of things whether or not there was a decoding error,
      * which simplifies exit paths - for example, you could call a big
@@ -205,19 +229,25 @@ struct BinarySource {
  * Implementation macros, similar to BinarySink.
  */
 #define BinarySource_IMPLEMENTATION BinarySource binarysource_[1]
-#define BinarySource_INIT__(obj, data_, len_)    \
-    ((obj)->data = (data_),                             \
-     (obj)->len = (len_),                               \
-     (obj)->pos = 0,                                    \
-     (obj)->err = BSE_NO_ERROR,                         \
-     (obj)->binarysource_ = (obj))
-#define BinarySource_BARE_INIT(obj, data_, len_)                \
+static inline void BinarySource_INIT__(BinarySource *src, ptrlen data)
+{
+    src->data = data.ptr;
+    src->len = data.len;
+    src->pos = 0;
+    src->err = BSE_NO_ERROR;
+    src->binarysource_ = src;
+}
+#define BinarySource_BARE_INIT_PL(obj, pl)                      \
     TYPECHECK(&(obj)->binarysource_ == (BinarySource **)0,      \
-              BinarySource_INIT__(obj, data_, len_))
-#define BinarySource_INIT(obj, data_, len_)                             \
+              BinarySource_INIT__(obj, pl))
+#define BinarySource_BARE_INIT(obj, data_, len_)                \
+    BinarySource_BARE_INIT_PL(obj, make_ptrlen(data_, len_))
+#define BinarySource_INIT_PL(obj, pl)                                   \
     TYPECHECK(&(obj)->binarysource_ == (BinarySource (*)[1])0,          \
-              BinarySource_INIT__(BinarySource_UPCAST(obj), data_, len_))
-#define BinarySource_DOWNCAST(object, type)                               \
+              BinarySource_INIT__(BinarySource_UPCAST(obj), pl))
+#define BinarySource_INIT(obj, data_, len_)             \
+    BinarySource_INIT_PL(obj, make_ptrlen(data_, len_))
+#define BinarySource_DOWNCAST(object, type)                             \
     TYPECHECK((object) == ((type *)0)->binarysource_,                     \
               ((type *)(((char *)(object)) - offsetof(type, binarysource_))))
 #define BinarySource_UPCAST(object)                                       \
@@ -225,6 +255,10 @@ struct BinarySource {
               (object)->binarysource_)
 #define BinarySource_COPIED(obj) \
     ((obj)->binarysource_->binarysource_ = (obj)->binarysource_)
+#define BinarySource_REWIND_TO(src, pos) \
+    BinarySource_REWIND_TO__((src)->binarysource_, pos)
+#define BinarySource_REWIND(src) \
+    BinarySource_REWIND_TO__((src)->binarysource_, 0)
 
 #define get_data(src, len) \
     BinarySource_get_data(BinarySource_UPCAST(src), len)
@@ -242,6 +276,12 @@ struct BinarySource {
     BinarySource_get_string(BinarySource_UPCAST(src))
 #define get_asciz(src) \
     BinarySource_get_asciz(BinarySource_UPCAST(src))
+#define get_chars(src, include) \
+    BinarySource_get_chars(BinarySource_UPCAST(src), include)
+#define get_nonchars(src, exclude) \
+    BinarySource_get_nonchars(BinarySource_UPCAST(src), exclude)
+#define get_chomped_line(src) \
+    BinarySource_get_chomped_line(BinarySource_UPCAST(src))
 #define get_pstring(src) \
     BinarySource_get_pstring(BinarySource_UPCAST(src))
 #define get_mp_ssh1(src) \
@@ -252,6 +292,8 @@ struct BinarySource {
     BinarySource_get_rsa_ssh1_pub(BinarySource_UPCAST(src), rsa, order)
 #define get_rsa_ssh1_priv(src, rsa) \
     BinarySource_get_rsa_ssh1_priv(BinarySource_UPCAST(src), rsa)
+#define get_rsa_ssh1_priv_agent(src) \
+    BinarySource_get_rsa_ssh1_priv_agent(BinarySource_UPCAST(src))
 
 #define get_err(src) (BinarySource_UPCAST(src)->err)
 #define get_avail(src) (BinarySource_UPCAST(src)->len - \
@@ -263,11 +305,36 @@ struct BinarySource {
 
 ptrlen BinarySource_get_data(BinarySource *, size_t);
 unsigned char BinarySource_get_byte(BinarySource *);
-int BinarySource_get_bool(BinarySource *);
+bool BinarySource_get_bool(BinarySource *);
 unsigned BinarySource_get_uint16(BinarySource *);
 unsigned long BinarySource_get_uint32(BinarySource *);
+uint64_t BinarySource_get_uint64(BinarySource *);
 ptrlen BinarySource_get_string(BinarySource *);
 const char *BinarySource_get_asciz(BinarySource *);
+ptrlen BinarySource_get_chars(BinarySource *, const char *include_set);
+ptrlen BinarySource_get_nonchars(BinarySource *, const char *exclude_set);
+ptrlen BinarySource_get_chomped_line(BinarySource *);
 ptrlen BinarySource_get_pstring(BinarySource *);
+mp_int *BinarySource_get_mp_ssh1(BinarySource *src);
+mp_int *BinarySource_get_mp_ssh2(BinarySource *src);
+
+void BinarySource_REWIND_TO__(BinarySource *src, size_t pos);
+
+/*
+ * A couple of useful standard BinarySink implementations, which live
+ * as sensibly here as anywhere else: one that makes a BinarySink
+ * whose effect is to write to a stdio stream, and one whose effect is
+ * to append to a bufchain.
+ */
+struct stdio_sink {
+    FILE *fp;
+    BinarySink_IMPLEMENTATION;
+};
+struct bufchain_sink {
+    bufchain *ch;
+    BinarySink_IMPLEMENTATION;
+};
+void stdio_sink_init(stdio_sink *sink, FILE *fp);
+void bufchain_sink_init(bufchain_sink *sink, bufchain *ch);
 
 #endif /* PUTTY_MARSHAL_H */

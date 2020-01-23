@@ -13,7 +13,9 @@
 /*
  * Enumeration of types used in keys and values.
  */
-typedef enum { TYPE_NONE, TYPE_INT, TYPE_STR, TYPE_FILENAME, TYPE_FONT } Type;
+typedef enum {
+    TYPE_NONE, TYPE_BOOL, TYPE_INT, TYPE_STR, TYPE_FILENAME, TYPE_FONT
+} Type;
 
 /*
  * Arrays which allow us to look up the subkey and value types for a
@@ -34,8 +36,8 @@ static int valuetypes[] = { CONFIG_OPTIONS(CONF_VALUETYPE_DEF) };
 struct key {
     int primary;
     union {
-	int i;
-	char *s;
+        int i;
+        char *s;
     } secondary;
 };
 
@@ -44,17 +46,18 @@ struct key {
 struct constkey {
     int primary;
     union {
-	int i;
-	const char *s;
+        int i;
+        const char *s;
     } secondary;
 };
 
 struct value {
     union {
-	int intval;
-	char *stringval;
-	Filename *fileval;
-	FontSpec *fontval;
+        bool boolval;
+        int intval;
+        char *stringval;
+        Filename *fileval;
+        FontSpec *fontval;
     } u;
 };
 
@@ -81,20 +84,20 @@ static int conf_cmp(void *av, void *bv)
     struct key *b = (struct key *)bv;
 
     if (a->primary < b->primary)
-	return -1;
+        return -1;
     else if (a->primary > b->primary)
-	return +1;
+        return +1;
     switch (subkeytypes[a->primary]) {
       case TYPE_INT:
-	if (a->secondary.i < b->secondary.i)
-	    return -1;
-	else if (a->secondary.i > b->secondary.i)
-	    return +1;
-	return 0;
+        if (a->secondary.i < b->secondary.i)
+            return -1;
+        else if (a->secondary.i > b->secondary.i)
+            return +1;
+        return 0;
       case TYPE_STR:
-	return strcmp(a->secondary.s, b->secondary.s);
+        return strcmp(a->secondary.s, b->secondary.s);
       default:
-	return 0;
+        return 0;
     }
 }
 
@@ -104,20 +107,20 @@ static int conf_cmp_constkey(void *av, void *bv)
     struct constkey *b = (struct constkey *)bv;
 
     if (a->primary < b->primary)
-	return -1;
+        return -1;
     else if (a->primary > b->primary)
-	return +1;
+        return +1;
     switch (subkeytypes[a->primary]) {
       case TYPE_INT:
-	if (a->secondary.i < b->secondary.i)
-	    return -1;
-	else if (a->secondary.i > b->secondary.i)
-	    return +1;
-	return 0;
+        if (a->secondary.i < b->secondary.i)
+            return -1;
+        else if (a->secondary.i > b->secondary.i)
+            return +1;
+        return 0;
       case TYPE_STR:
-	return strcmp(a->secondary.s, b->secondary.s);
+        return strcmp(a->secondary.s, b->secondary.s);
       default:
-	return 0;
+        return 0;
     }
 }
 
@@ -129,7 +132,7 @@ static int conf_cmp_constkey(void *av, void *bv)
 static void free_key(struct key *key)
 {
     if (subkeytypes[key->primary] == TYPE_STR)
-	sfree(key->secondary.s);
+        sfree(key->secondary.s);
 }
 
 /*
@@ -141,11 +144,11 @@ static void copy_key(struct key *to, struct key *from)
     to->primary = from->primary;
     switch (subkeytypes[to->primary]) {
       case TYPE_INT:
-	to->secondary.i = from->secondary.i;
-	break;
+        to->secondary.i = from->secondary.i;
+        break;
       case TYPE_STR:
-	to->secondary.s = dupstr(from->secondary.s);
-	break;
+        to->secondary.s = dupstr(from->secondary.s);
+        break;
     }
 }
 
@@ -157,11 +160,11 @@ static void copy_key(struct key *to, struct key *from)
 static void free_value(struct value *val, int type)
 {
     if (type == TYPE_STR)
-	sfree(val->u.stringval);
+        sfree(val->u.stringval);
     else if (type == TYPE_FILENAME)
-	filename_free(val->u.fileval);
+        filename_free(val->u.fileval);
     else if (type == TYPE_FONT)
-	fontspec_free(val->u.fontval);
+        fontspec_free(val->u.fontval);
 }
 
 /*
@@ -171,18 +174,21 @@ static void free_value(struct value *val, int type)
 static void copy_value(struct value *to, struct value *from, int type)
 {
     switch (type) {
+      case TYPE_BOOL:
+        to->u.boolval = from->u.boolval;
+        break;
       case TYPE_INT:
-	to->u.intval = from->u.intval;
-	break;
+        to->u.intval = from->u.intval;
+        break;
       case TYPE_STR:
-	to->u.stringval = dupstr(from->u.stringval);
-	break;
+        to->u.stringval = dupstr(from->u.stringval);
+        break;
       case TYPE_FILENAME:
-	to->u.fileval = filename_copy(from->u.fileval);
-	break;
+        to->u.fileval = filename_copy(from->u.fileval);
+        break;
       case TYPE_FONT:
-	to->u.fontval = fontspec_copy(from->u.fontval);
-	break;
+        to->u.fontval = fontspec_copy(from->u.fontval);
+        break;
     }
 }
 
@@ -209,8 +215,8 @@ static void conf_clear(Conf *conf)
 {
     struct conf_entry *entry;
 
-    while ((entry = delpos234(conf->tree, 0)) != NULL)
-	free_entry(entry);
+    while ((entry = (struct conf_entry *) delpos234(conf->tree, 0)) != NULL)
+        free_entry(entry);
 }
 
 void conf_free(Conf *conf)
@@ -222,12 +228,12 @@ void conf_free(Conf *conf)
 
 static void conf_insert(Conf *conf, struct conf_entry *entry)
 {
-    struct conf_entry *oldentry = add234(conf->tree, entry);
+    struct conf_entry *oldentry = (struct conf_entry *) add234(conf->tree, entry);
     if (oldentry && oldentry != entry) {
-	del234(conf->tree, oldentry);
-	free_entry(oldentry);
-	oldentry = add234(conf->tree, entry);
-	assert(oldentry == entry);
+        del234(conf->tree, oldentry);
+        free_entry(oldentry);
+        oldentry = (struct conf_entry *) add234(conf->tree, entry);
+        assert(oldentry == entry);
     }
 }
 
@@ -238,12 +244,12 @@ void conf_copy_into(Conf *newconf, Conf *oldconf)
 
     conf_clear(newconf);
 
-    for (i = 0; (entry = index234(oldconf->tree, i)) != NULL; i++) {
-	entry2 = snew(struct conf_entry);
-	copy_key(&entry2->key, &entry->key);
-	copy_value(&entry2->value, &entry->value,
-		   valuetypes[entry->key.primary]);
-	add234(newconf->tree, entry2);
+    for (i = 0; (entry = (struct conf_entry *) index234(oldconf->tree, i)) != NULL; i++) {
+        entry2 = snew(struct conf_entry);
+        copy_key(&entry2->key, &entry->key);
+        copy_value(&entry2->value, &entry->value,
+                   valuetypes[entry->key.primary]);
+        add234(newconf->tree, entry2);
     }
 }
 
@@ -254,6 +260,19 @@ Conf *conf_copy(Conf *oldconf)
     conf_copy_into(newconf, oldconf);
 
     return newconf;
+}
+
+bool conf_get_bool(Conf *conf, int primary)
+{
+    struct key key;
+    struct conf_entry *entry;
+
+    assert(subkeytypes[primary] == TYPE_NONE);
+    assert(valuetypes[primary] == TYPE_BOOL);
+    key.primary = primary;
+    entry = find234(conf->tree, &key, NULL);
+    assert(entry);
+    return entry->value.u.boolval;
 }
 
 int conf_get_int(Conf *conf, int primary)
@@ -317,7 +336,7 @@ char *conf_get_str_str(Conf *conf, int primary, const char *secondary)
 }
 
 char *conf_get_str_strs(Conf *conf, int primary,
-		       char *subkeyin, char **subkeyout)
+                       char *subkeyin, char **subkeyout)
 {
     struct constkey key;
     struct conf_entry *entry;
@@ -326,14 +345,14 @@ char *conf_get_str_strs(Conf *conf, int primary,
     assert(valuetypes[primary] == TYPE_STR);
     key.primary = primary;
     if (subkeyin) {
-	key.secondary.s = subkeyin;
-	entry = findrel234(conf->tree, &key, NULL, REL234_GT);
+        key.secondary.s = subkeyin;
+        entry = findrel234(conf->tree, &key, NULL, REL234_GT);
     } else {
-	key.secondary.s = "";
-	entry = findrel234(conf->tree, &key, conf_cmp_constkey, REL234_GE);
+        key.secondary.s = "";
+        entry = findrel234(conf->tree, &key, conf_cmp_constkey, REL234_GE);
     }
     if (!entry || entry->key.primary != primary)
-	return NULL;
+        return NULL;
     *subkeyout = entry->key.secondary.s;
     return entry->value.u.stringval;
 }
@@ -351,10 +370,10 @@ char *conf_get_str_nthstrkey(Conf *conf, int primary, int n)
     entry = findrelpos234(conf->tree, &key, conf_cmp_constkey,
                           REL234_GE, &index);
     if (!entry || entry->key.primary != primary)
-	return NULL;
+        return NULL;
     entry = index234(conf->tree, index + n);
     if (!entry || entry->key.primary != primary)
-	return NULL;
+        return NULL;
     return entry->key.secondary.s;
 }
 
@@ -384,6 +403,17 @@ FontSpec *conf_get_fontspec(Conf *conf, int primary)
     return entry->value.u.fontval;
 }
 
+void conf_set_bool(Conf *conf, int primary, bool value)
+{
+    struct conf_entry *entry = snew(struct conf_entry);
+
+    assert(subkeytypes[primary] == TYPE_NONE);
+    assert(valuetypes[primary] == TYPE_BOOL);
+    entry->key.primary = primary;
+    entry->value.u.boolval = value;
+    conf_insert(conf, entry);
+}
+
 void conf_set_int(Conf *conf, int primary, int value)
 {
     struct conf_entry *entry = snew(struct conf_entry);
@@ -391,11 +421,12 @@ void conf_set_int(Conf *conf, int primary, int value)
     assert(subkeytypes[primary] == TYPE_NONE);
     assert(valuetypes[primary] == TYPE_INT);
     entry->key.primary = primary;
-    entry->value.u.intval = value; 
+    entry->value.u.intval = value;
     conf_insert(conf, entry);
 }
 
-void conf_set_int_int(Conf *conf, int primary, int secondary, int value)
+void conf_set_int_int(Conf *conf, int primary,
+                      int secondary, int value)
 {
     struct conf_entry *entry = snew(struct conf_entry);
 
@@ -419,7 +450,7 @@ void conf_set_str(Conf *conf, int primary, const char *value)
 }
 
 void conf_set_str_str(Conf *conf, int primary, const char *secondary,
-		      const char *value)
+                      const char *value)
 {
     struct conf_entry *entry = snew(struct conf_entry);
 
@@ -442,8 +473,8 @@ void conf_del_str_str(Conf *conf, int primary, const char *secondary)
     key.secondary.s = (char *)secondary;
     entry = find234(conf->tree, &key, NULL);
     if (entry) {
-	del234(conf->tree, entry);
-	free_entry(entry);
+        del234(conf->tree, entry);
+        free_entry(entry);
     }
  }
 
@@ -475,36 +506,39 @@ void conf_serialise(BinarySink *bs, Conf *conf)
     struct conf_entry *entry;
 
     for (i = 0; (entry = index234(conf->tree, i)) != NULL; i++) {
-	put_uint32(bs, entry->key.primary);
+        put_uint32(bs, entry->key.primary);
 
-	switch (subkeytypes[entry->key.primary]) {
-	  case TYPE_INT:
-	    put_uint32(bs, entry->key.secondary.i);
-	    break;
-	  case TYPE_STR:
+        switch (subkeytypes[entry->key.primary]) {
+          case TYPE_INT:
+            put_uint32(bs, entry->key.secondary.i);
+            break;
+          case TYPE_STR:
             put_asciz(bs, entry->key.secondary.s);
-	    break;
-	}
-	switch (valuetypes[entry->key.primary]) {
-	  case TYPE_INT:
-	    put_uint32(bs, entry->value.u.intval);
-	    break;
-	  case TYPE_STR:
-	    put_asciz(bs, entry->value.u.stringval);
-	    break;
-	  case TYPE_FILENAME:
+            break;
+        }
+        switch (valuetypes[entry->key.primary]) {
+          case TYPE_BOOL:
+            put_bool(bs, entry->value.u.boolval);
+            break;
+          case TYPE_INT:
+            put_uint32(bs, entry->value.u.intval);
+            break;
+          case TYPE_STR:
+            put_asciz(bs, entry->value.u.stringval);
+            break;
+          case TYPE_FILENAME:
             filename_serialise(bs, entry->value.u.fileval);
-	    break;
-	  case TYPE_FONT:
+            break;
+          case TYPE_FONT:
             fontspec_serialise(bs, entry->value.u.fontval);
-	    break;
-	}
+            break;
+        }
     }
 
     put_uint32(bs, 0xFFFFFFFFU);
 }
 
-int conf_deserialise(Conf *conf, BinarySource *src)
+bool conf_deserialise(Conf *conf, BinarySource *src)
 {
     struct conf_entry *entry;
     unsigned primary;
@@ -513,44 +547,47 @@ int conf_deserialise(Conf *conf, BinarySource *src)
         primary = get_uint32(src);
 
         if (get_err(src))
-            return FALSE;
+            return false;
         if (primary == 0xFFFFFFFFU)
-            return TRUE;
-	if (primary >= N_CONFIG_OPTIONS)
-	    return FALSE;
+            return true;
+        if (primary >= N_CONFIG_OPTIONS)
+            return false;
 
-	entry = snew(struct conf_entry);
-	entry->key.primary = primary;
+        entry = snew(struct conf_entry);
+        entry->key.primary = primary;
 
-	switch (subkeytypes[entry->key.primary]) {
-	  case TYPE_INT:
-	    entry->key.secondary.i = toint(get_uint32(src));
-	    break;
-	  case TYPE_STR:
-	    entry->key.secondary.s = dupstr(get_asciz(src));
-	    break;
-	}
+        switch (subkeytypes[entry->key.primary]) {
+          case TYPE_INT:
+            entry->key.secondary.i = toint(get_uint32(src));
+            break;
+          case TYPE_STR:
+            entry->key.secondary.s = dupstr(get_asciz(src));
+            break;
+        }
 
-	switch (valuetypes[entry->key.primary]) {
-	  case TYPE_INT:
-	    entry->value.u.intval = toint(get_uint32(src));
-	    break;
-	  case TYPE_STR:
-	    entry->value.u.stringval = dupstr(get_asciz(src));
-	    break;
-	  case TYPE_FILENAME:
+        switch (valuetypes[entry->key.primary]) {
+          case TYPE_BOOL:
+            entry->value.u.boolval = get_bool(src);
+            break;
+          case TYPE_INT:
+            entry->value.u.intval = toint(get_uint32(src));
+            break;
+          case TYPE_STR:
+            entry->value.u.stringval = dupstr(get_asciz(src));
+            break;
+          case TYPE_FILENAME:
             entry->value.u.fileval = filename_deserialise(src);
-	    break;
-	  case TYPE_FONT:
+            break;
+          case TYPE_FONT:
             entry->value.u.fontval = fontspec_deserialise(src);
-	    break;
-	}
+            break;
+        }
 
         if (get_err(src)) {
             free_entry(entry);
-            return FALSE;
+            return false;
         }
 
-	conf_insert(conf, entry);
+        conf_insert(conf, entry);
     }
 }
