@@ -788,17 +788,20 @@ static ssh_key *eddsa_new_priv_openssh(
 
 static void eddsa_openssh_blob(ssh_key *key, BinarySink *bs)
 {
+    strbuf *pub_sb;
+    ptrlen pub, priv;
+    strbuf *priv_sb;
     struct eddsa_key *ek = container_of(key, struct eddsa_key, sshk);
     assert(ek->curve->type == EC_EDWARDS);
 
     /* Encode the public and private points as strings */
-    strbuf *pub_sb = strbuf_new();
+    pub_sb = strbuf_new();
     put_epoint(pub_sb, ek->publicKey, ek->curve, false);
-    ptrlen pub = make_ptrlen(pub_sb->s + 4, pub_sb->len - 4);
+    pub = make_ptrlen(pub_sb->s + 4, pub_sb->len - 4);
 
-    strbuf *priv_sb = strbuf_new_nm();
+    priv_sb = strbuf_new_nm();
     put_mp_le_unsigned(priv_sb, ek->privateKey);
-    ptrlen priv = make_ptrlen(priv_sb->s + 4, priv_sb->len - 4);
+    priv = make_ptrlen(priv_sb->s + 4, priv_sb->len - 4);
 
     put_stringpl(bs, pub);
 
@@ -815,6 +818,7 @@ static void eddsa_openssh_blob(ssh_key *key, BinarySink *bs)
 static ssh_key *ecdsa_new_priv_openssh(
     const ssh_keyalg *alg, BinarySource *src)
 {
+    struct ecdsa_key *ek;
     const struct ecsign_extra *extra =
         (const struct ecsign_extra *)alg->extra;
     struct ec_curve *curve = extra->curve();
@@ -822,7 +826,7 @@ static ssh_key *ecdsa_new_priv_openssh(
 
     get_string(src);
 
-    struct ecdsa_key *ek = snew(struct ecdsa_key);
+    ek = snew(struct ecdsa_key);
     ek->sshk.vt = alg;
     ek->curve = curve;
     ek->privateKey = NULL;
@@ -858,6 +862,9 @@ static mp_int *ecdsa_signing_exponent_from_data(
     const struct ec_curve *curve, const struct ecsign_extra *extra,
     ptrlen data)
 {
+    mp_int *z;
+    size_t zbits, nbits, shift;
+    mp_int *toret;
     /* Hash the data being signed. */
     unsigned char hash[MAX_HASH_LEN];
     ssh_hash *h = ssh_hash_new(extra->hash);
@@ -868,14 +875,14 @@ static mp_int *ecdsa_signing_exponent_from_data(
      * Take the leftmost b bits of the hash of the signed data (where
      * b is the number of bits in order(G)), interpreted big-endian.
      */
-    mp_int *z = mp_from_bytes_be(make_ptrlen(hash, extra->hash->hlen));
-    size_t zbits = mp_get_nbits(z);
-    size_t nbits = mp_get_nbits(curve->w.G_order);
-    size_t shift = zbits - nbits;
+    z = mp_from_bytes_be(make_ptrlen(hash, extra->hash->hlen));
+    zbits = mp_get_nbits(z);
+    nbits = mp_get_nbits(curve->w.G_order);
+    shift = zbits - nbits;
     /* Bound the shift count below at 0, using bit twiddling to avoid
      * a conditional branch */
     shift &= ~-(shift >> (CHAR_BIT * sizeof(size_t) - 1));
-    mp_int *toret = mp_rshift_safe(z, shift);
+    toret = mp_rshift_safe(z, shift);
     mp_free(z);
 
     return toret;
@@ -883,6 +890,11 @@ static mp_int *ecdsa_signing_exponent_from_data(
 
 static bool ecdsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
 {
+    ptrlen sigstr;
+    mp_int *r, *s, *x;
+    unsigned invalid;
+    mp_int *z, *w, *u1, *u2;
+    WeierstrassPoint *u1G, *u2P, *sum;
     struct ecdsa_key *ek = container_of(key, struct ecdsa_key, sshk);
     const struct ecsign_extra *extra =
         (const struct ecsign_extra *)ek->sshk.vt->extra;
@@ -895,14 +907,14 @@ static bool ecdsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
         return false;
 
     /* Everything else is nested inside a sub-string. Descend into that. */
-    ptrlen sigstr = get_string(src);
+    sigstr = get_string(src);
     if (get_err(src))
         return false;
     BinarySource_BARE_INIT_PL(src, sigstr);
 
     /* Extract the signature integers r,s */
-    mp_int *r = get_mp_ssh2(src);
-    mp_int *s = get_mp_ssh2(src);
+    r = get_mp_ssh2(src);
+    s = get_mp_ssh2(src);
     if (get_err(src)) {
         mp_free(r);
         mp_free(s);
@@ -910,30 +922,29 @@ static bool ecdsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
     }
 
     /* Basic sanity checks: 0 < r,s < order(G) */
-    unsigned invalid = 0;
+    invalid = 0;
     invalid |= mp_eq_integer(r, 0);
     invalid |= mp_eq_integer(s, 0);
     invalid |= mp_cmp_hs(r, ek->curve->w.G_order);
     invalid |= mp_cmp_hs(s, ek->curve->w.G_order);
 
     /* Get the hash of the signed data, converted to an integer */
-    mp_int *z = ecdsa_signing_exponent_from_data(ek->curve, extra, data);
+    z = ecdsa_signing_exponent_from_data(ek->curve, extra, data);
 
     /* Verify the signature integers against the hash */
-    mp_int *w = mp_invert(s, ek->curve->w.G_order);
-    mp_int *u1 = mp_modmul(z, w, ek->curve->w.G_order);
+    w = mp_invert(s, ek->curve->w.G_order);
+    u1 = mp_modmul(z, w, ek->curve->w.G_order);
     mp_free(z);
-    mp_int *u2 = mp_modmul(r, w, ek->curve->w.G_order);
+    u2 = mp_modmul(r, w, ek->curve->w.G_order);
     mp_free(w);
-    WeierstrassPoint *u1G = ecc_weierstrass_multiply(ek->curve->w.G, u1);
+    u1G = ecc_weierstrass_multiply(ek->curve->w.G, u1);
     mp_free(u1);
-    WeierstrassPoint *u2P = ecc_weierstrass_multiply(ek->publicKey, u2);
+    u2P = ecc_weierstrass_multiply(ek->publicKey, u2);
     mp_free(u2);
-    WeierstrassPoint *sum = ecc_weierstrass_add_general(u1G, u2P);
+    sum = ecc_weierstrass_add_general(u1G, u2P);
     ecc_weierstrass_point_free(u1G);
     ecc_weierstrass_point_free(u2P);
 
-    mp_int *x;
     ecc_weierstrass_get_affine(sum, &x, NULL);
     ecc_weierstrass_point_free(sum);
 
@@ -951,6 +962,7 @@ static mp_int *eddsa_signing_exponent_from_data(
     struct eddsa_key *ek, const struct ecsign_extra *extra,
     ptrlen r_encoded, ptrlen data)
 {
+    mp_int *toret;
     /* Hash (r || public key || message) */
     unsigned char hash[MAX_HASH_LEN];
     ssh_hash *h = ssh_hash_new(extra->hash);
@@ -960,7 +972,7 @@ static mp_int *eddsa_signing_exponent_from_data(
     ssh_hash_final(h, hash);
 
     /* Convert to an integer */
-    mp_int *toret = mp_from_bytes_le(make_ptrlen(hash, extra->hash->hlen));
+    toret = mp_from_bytes_le(make_ptrlen(hash, extra->hash->hlen));
 
     smemclr(hash, extra->hash->hlen);
     return toret;
@@ -968,6 +980,10 @@ static mp_int *eddsa_signing_exponent_from_data(
 
 static bool eddsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
 {
+    ptrlen sigstr, rstr, sstr;
+    EdwardsPoint *r, *lhs, *hpk, *rhs;
+    unsigned valid;
+    mp_int *s, *H;
     struct eddsa_key *ek = container_of(key, struct eddsa_key, sshk);
     const struct ecsign_extra *extra =
         (const struct ecsign_extra *)ek->sshk.vt->extra;
@@ -981,30 +997,30 @@ static bool eddsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
 
     /* Now expect a single string which is the concatenation of an
      * encoded curve point r and an integer s. */
-    ptrlen sigstr = get_string(src);
+    sigstr = get_string(src);
     if (get_err(src))
         return false;
     BinarySource_BARE_INIT_PL(src, sigstr);
-    ptrlen rstr = get_data(src, ek->curve->fieldBytes);
-    ptrlen sstr = get_data(src, ek->curve->fieldBytes);
+    rstr = get_data(src, ek->curve->fieldBytes);
+    sstr = get_data(src, ek->curve->fieldBytes);
     if (get_err(src) || get_avail(src))
         return false;
 
-    EdwardsPoint *r = eddsa_decode(rstr, ek->curve);
+    r = eddsa_decode(rstr, ek->curve);
     if (!r)
         return false;
-    mp_int *s = mp_from_bytes_le(sstr);
+    s = mp_from_bytes_le(sstr);
 
-    mp_int *H = eddsa_signing_exponent_from_data(ek, extra, rstr, data);
+    H = eddsa_signing_exponent_from_data(ek, extra, rstr, data);
 
     /* Verify that s*G == r + H*publicKey */
-    EdwardsPoint *lhs = ecc_edwards_multiply(ek->curve->e.G, s);
+    lhs = ecc_edwards_multiply(ek->curve->e.G, s);
     mp_free(s);
-    EdwardsPoint *hpk = ecc_edwards_multiply(ek->publicKey, H);
+    hpk = ecc_edwards_multiply(ek->publicKey, H);
     mp_free(H);
-    EdwardsPoint *rhs = ecc_edwards_add(r, hpk);
+    rhs = ecc_edwards_add(r, hpk);
     ecc_edwards_point_free(hpk);
-    unsigned valid = ecc_edwards_eq(lhs, rhs);
+    valid = ecc_edwards_eq(lhs, rhs);
     ecc_edwards_point_free(lhs);
     ecc_edwards_point_free(rhs);
     ecc_edwards_point_free(r);
@@ -1015,16 +1031,18 @@ static bool eddsa_verify(ssh_key *key, ptrlen sig, ptrlen data)
 static void ecdsa_sign(ssh_key *key, ptrlen data,
                        unsigned flags, BinarySink *bs)
 {
+    mp_int *z, *k, *x, *r, *rPriv, *numerator, *kInv, *s;
+    WeierstrassPoint *kG;
+    strbuf *substr;
     struct ecdsa_key *ek = container_of(key, struct ecdsa_key, sshk);
     const struct ecsign_extra *extra =
         (const struct ecsign_extra *)ek->sshk.vt->extra;
     assert(ek->privateKey);
 
-    mp_int *z = ecdsa_signing_exponent_from_data(ek->curve, extra, data);
+    z = ecdsa_signing_exponent_from_data(ek->curve, extra, data);
 
     /* Generate k between 1 and curve->n, using the same deterministic
      * k generation system we use for conventional DSA. */
-    mp_int *k;
     {
         unsigned char digest[20];
         hash_simple(&ssh_sha1, data, digest);
@@ -1033,30 +1051,29 @@ static void ecdsa_sign(ssh_key *key, ptrlen data,
             ek->privateKey, digest, sizeof(digest));
     }
 
-    WeierstrassPoint *kG = ecc_weierstrass_multiply(ek->curve->w.G, k);
-    mp_int *x;
+    kG = ecc_weierstrass_multiply(ek->curve->w.G, k);
     ecc_weierstrass_get_affine(kG, &x, NULL);
     ecc_weierstrass_point_free(kG);
 
     /* r = kG.x mod order(G) */
-    mp_int *r = mp_mod(x, ek->curve->w.G_order);
+    r = mp_mod(x, ek->curve->w.G_order);
     mp_free(x);
 
     /* s = (z + r * priv)/k mod n */
-    mp_int *rPriv = mp_modmul(r, ek->privateKey, ek->curve->w.G_order);
-    mp_int *numerator = mp_modadd(z, rPriv, ek->curve->w.G_order);
+    rPriv = mp_modmul(r, ek->privateKey, ek->curve->w.G_order);
+    numerator = mp_modadd(z, rPriv, ek->curve->w.G_order);
     mp_free(z);
     mp_free(rPriv);
-    mp_int *kInv = mp_invert(k, ek->curve->w.G_order);
+    kInv = mp_invert(k, ek->curve->w.G_order);
     mp_free(k);
-    mp_int *s = mp_modmul(numerator, kInv, ek->curve->w.G_order);
+    s = mp_modmul(numerator, kInv, ek->curve->w.G_order);
     mp_free(numerator);
     mp_free(kInv);
 
     /* Format the output */
     put_stringz(bs, ek->sshk.vt->ssh_id);
 
-    strbuf *substr = strbuf_new();
+    substr = strbuf_new();
     put_mp_ssh2(substr, r);
     put_mp_ssh2(substr, s);
     put_stringsb(bs, substr);
@@ -1068,6 +1085,12 @@ static void ecdsa_sign(ssh_key *key, ptrlen data,
 static void eddsa_sign(ssh_key *key, ptrlen data,
                        unsigned flags, BinarySink *bs)
 {
+    unsigned char hash[MAX_HASH_LEN];
+    ssh_hash *h;
+    size_t i;
+    mp_int *a, *log_r_unreduced, *log_r, *H, *Ha, *s;
+    EdwardsPoint *r;
+    strbuf *r_enc;
     struct eddsa_key *ek = container_of(key, struct eddsa_key, sshk);
     const struct ecsign_extra *extra =
         (const struct ecsign_extra *)ek->sshk.vt->extra;
@@ -1087,9 +1110,8 @@ static void eddsa_sign(ssh_key *key, ptrlen data,
      * First, we hash the private key integer (bare, little-endian)
      * into a hash generating 2*fieldBytes of output.
      */
-    unsigned char hash[MAX_HASH_LEN];
-    ssh_hash *h = ssh_hash_new(extra->hash);
-    for (size_t i = 0; i < ek->curve->fieldBytes; ++i)
+    h = ssh_hash_new(extra->hash);
+    for (i = 0; i < ek->curve->fieldBytes; ++i)
         put_byte(h, mp_get_byte(ek->privateKey, i));
     ssh_hash_final(h, hash);
 
@@ -1097,7 +1119,7 @@ static void eddsa_sign(ssh_key *key, ptrlen data,
      * The first half of the output hash is converted into an
      * integer a, by the standard EdDSA transformation.
      */
-    mp_int *a = eddsa_exponent_from_hash(
+    a = eddsa_exponent_from_hash(
         make_ptrlen(hash, ek->curve->fieldBytes), ek->curve);
 
     /*
@@ -1110,17 +1132,17 @@ static void eddsa_sign(ssh_key *key, ptrlen data,
              extra->hash->hlen - ek->curve->fieldBytes);
     put_datapl(h, data);
     ssh_hash_final(h, hash);
-    mp_int *log_r_unreduced = mp_from_bytes_le(
+    log_r_unreduced = mp_from_bytes_le(
         make_ptrlen(hash, extra->hash->hlen));
-    mp_int *log_r = mp_mod(log_r_unreduced, ek->curve->e.G_order);
+    log_r = mp_mod(log_r_unreduced, ek->curve->e.G_order);
     mp_free(log_r_unreduced);
-    EdwardsPoint *r = ecc_edwards_multiply(ek->curve->e.G, log_r);
+    r = ecc_edwards_multiply(ek->curve->e.G, log_r);
 
     /*
      * Encode r now, because we'll need its encoding for the next
      * hashing step as well as to write into the actual signature.
      */
-    strbuf *r_enc = strbuf_new();
+    r_enc = strbuf_new();
     put_epoint(r_enc, r, ek->curve, true); /* omit string header */
     ecc_edwards_point_free(r);
 
@@ -1128,12 +1150,12 @@ static void eddsa_sign(ssh_key *key, ptrlen data,
      * Compute the hash of (r || public key || message) just as
      * eddsa_verify does.
      */
-    mp_int *H = eddsa_signing_exponent_from_data(
+    H = eddsa_signing_exponent_from_data(
         ek, extra, ptrlen_from_strbuf(r_enc), data);
 
     /* And then s = (log(r) + H*a) mod order(G). */
-    mp_int *Ha = mp_modmul(H, a, ek->curve->e.G_order);
-    mp_int *s = mp_modadd(log_r, Ha, ek->curve->e.G_order);
+    Ha = mp_modmul(H, a, ek->curve->e.G_order);
+    s = mp_modadd(log_r, Ha, ek->curve->e.G_order);
     mp_free(H);
     mp_free(a);
     mp_free(Ha);
@@ -1144,7 +1166,7 @@ static void eddsa_sign(ssh_key *key, ptrlen data,
     put_uint32(bs, r_enc->len + ek->curve->fieldBytes);
     put_data(bs, r_enc->u, r_enc->len);
     strbuf_free(r_enc);
-    for (size_t i = 0; i < ek->curve->fieldBytes; ++i)
+    for (i = 0; i < ek->curve->fieldBytes; ++i)
         put_byte(bs, mp_get_byte(s, i));
     mp_free(s);
 }
@@ -1305,6 +1327,7 @@ static void ssh_ecdhkex_w_setup(ecdh_key *dh)
 
 static void ssh_ecdhkex_m_setup(ecdh_key *dh)
 {
+    unsigned bit;
     strbuf *bytes = strbuf_new_nm();
     random_read(strbuf_append(bytes, dh->curve->fieldBytes),
                 dh->curve->fieldBytes);
@@ -1317,7 +1340,7 @@ static void ssh_ecdhkex_m_setup(ecdh_key *dh)
     mp_set_bit(dh->private, dh->curve->fieldBits - 1, 1);
 
     /* Clear a curve-specific number of low bits */
-    for (unsigned bit = 0; bit < dh->curve->m.log2_cofactor; bit++)
+    for (bit = 0; bit < dh->curve->m.log2_cofactor; bit++)
         mp_set_bit(dh->private, bit, 0);
 
     strbuf_free(bytes);
@@ -1344,9 +1367,10 @@ static void ssh_ecdhkex_w_getpublic(ecdh_key *dh, BinarySink *bs)
 
 static void ssh_ecdhkex_m_getpublic(ecdh_key *dh, BinarySink *bs)
 {
+    size_t i;
     mp_int *x;
     ecc_montgomery_get_affine(dh->m_public, &x);
-    for (size_t i = 0; i < dh->curve->fieldBytes; ++i)
+    for (i = 0; i < dh->curve->fieldBytes; ++i)
         put_byte(bs, mp_get_byte(x, i));
     mp_free(x);
 }
@@ -1359,6 +1383,8 @@ void ssh_ecdhkex_getpublic(ecdh_key *dh, BinarySink *bs)
 static mp_int *ssh_ecdhkex_w_getkey(ecdh_key *dh, ptrlen remoteKey)
 {
     WeierstrassPoint *remote_p = ecdsa_decode(remoteKey, dh->curve);
+    WeierstrassPoint *p;
+    mp_int *x;
     if (!remote_p)
         return NULL;
 
@@ -1368,9 +1394,8 @@ static mp_int *ssh_ecdhkex_w_getkey(ecdh_key *dh, ptrlen remoteKey)
         return NULL;
     }
 
-    WeierstrassPoint *p = ecc_weierstrass_multiply(remote_p, dh->private);
+    p = ecc_weierstrass_multiply(remote_p, dh->private);
 
-    mp_int *x;
     ecc_weierstrass_get_affine(p, &x, NULL);
 
     ecc_weierstrass_point_free(remote_p);
@@ -1382,6 +1407,10 @@ static mp_int *ssh_ecdhkex_w_getkey(ecdh_key *dh, ptrlen remoteKey)
 static mp_int *ssh_ecdhkex_m_getkey(ecdh_key *dh, ptrlen remoteKey)
 {
     mp_int *remote_x = mp_from_bytes_le(remoteKey);
+    MontgomeryPoint *remote_p, *p;
+    mp_int *x;
+    strbuf *sb;
+    size_t i;
 
     /* Per RFC 7748 section 5, discard any set bits of the other
      * side's public value beyond the minimum number of bits required
@@ -1405,12 +1434,11 @@ static mp_int *ssh_ecdhkex_m_getkey(ecdh_key *dh, ptrlen remoteKey)
         mp_free(remote_x);
         return NULL;
     }
-    MontgomeryPoint *remote_p = ecc_montgomery_point_new(
+    remote_p = ecc_montgomery_point_new(
         dh->curve->m.mc, remote_x);
     mp_free(remote_x);
 
-    MontgomeryPoint *p = ecc_montgomery_multiply(remote_p, dh->private);
-    mp_int *x;
+    p = ecc_montgomery_multiply(remote_p, dh->private);
     ecc_montgomery_get_affine(p, &x);
 
     ecc_montgomery_point_free(remote_p);
@@ -1430,8 +1458,8 @@ static mp_int *ssh_ecdhkex_m_getkey(ecdh_key *dh, ptrlen remoteKey)
      * being zero, so that has to be converted into an SSH-2 bignum
      * with the _low_ byte zero, i.e. a multiple of 256.
      */
-    strbuf *sb = strbuf_new();
-    for (size_t i = 0; i < dh->curve->fieldBytes; ++i)
+    sb = strbuf_new();
+    for (i = 0; i < dh->curve->fieldBytes; ++i)
         put_byte(sb, mp_get_byte(x, i));
     mp_free(x);
     x = mp_from_bytes_be(ptrlen_from_strbuf(sb));

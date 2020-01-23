@@ -57,11 +57,12 @@ static void lf_free(LoadedFile *lf)
 static LoadedFile *lf_load(const Filename *filename, size_t max_size,
                            bool tolerate_overflow)
 {
+    LoadedFile *lf;
     FILE *fp = f_open(filename, "rb", false);
     if (!fp)
         return NULL;
 
-    LoadedFile *lf = snew_plus(LoadedFile, max_size);
+    lf = snew_plus(LoadedFile, max_size);
     lf->data = snew_plus_get_aux(lf);
     lf->len = 0;
 
@@ -155,6 +156,7 @@ static int rsa1_load_s_internal(BinarySource *src, RSAKey *key, bool pub_only,
      * Decrypt remainder of buffer.
      */
     if (ciphertype) {
+        unsigned char keybuf[16];
         size_t enclen = get_avail(src);
         if (enclen & 7)
             goto end;
@@ -162,7 +164,6 @@ static int rsa1_load_s_internal(BinarySource *src, RSAKey *key, bool pub_only,
         buf = strbuf_new_nm();
         put_datapl(buf, get_data(src, enclen));
 
-        unsigned char keybuf[16];
         hash_simple(&ssh_md5, ptrlen_from_asciz(passphrase), keybuf);
         des3_decrypt_pubkey(keybuf, buf->u, enclen);
         smemclr(keybuf, sizeof(keybuf));        /* burn the evidence */
@@ -220,13 +221,14 @@ int rsa1_load_s(BinarySource *src, RSAKey *key,
 int rsa1_load_f(const Filename *filename, RSAKey *key,
                 const char *passphrase, const char **errstr)
 {
+    int toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf) {
         *errstr = "can't open file";
         return false;
     }
 
-    int toret = rsa1_load_s(BinarySource_UPCAST(lf), key, passphrase, errstr);
+    toret = rsa1_load_s(BinarySource_UPCAST(lf), key, passphrase, errstr);
     lf_free(lf);
     return toret;
 }
@@ -243,11 +245,12 @@ bool rsa1_encrypted_s(BinarySource *src, char **comment)
 
 bool rsa1_encrypted_f(const Filename *filename, char **comment)
 {
+    bool toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf)
         return false; /* couldn't even open the file */
 
-    bool toret = rsa1_encrypted_s(BinarySource_UPCAST(lf), comment);
+    toret = rsa1_encrypted_s(BinarySource_UPCAST(lf), comment);
     lf_free(lf);
     return toret;
 }
@@ -262,11 +265,12 @@ int rsa1_loadpub_s(BinarySource *src, BinarySink *bs,
     RSAKey key;
     int ret;
     const char *error = NULL;
+     bool is_privkey_file;
 
     /* Default return if we fail. */
     ret = 0;
 
-    bool is_privkey_file = expect_signature(src, rsa1_signature);
+    is_privkey_file = expect_signature(src, rsa1_signature);
     BinarySource_REWIND(src);
 
     if (is_privkey_file) {
@@ -342,13 +346,14 @@ int rsa1_loadpub_s(BinarySource *src, BinarySink *bs,
 int rsa1_loadpub_f(const Filename *filename, BinarySink *bs,
                    char **commentptr, const char **errorstr)
 {
+    int toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf) {
         *errorstr = "can't open file";
         return 0;
     }
 
-    int toret = rsa1_loadpub_s(BinarySource_UPCAST(lf), bs,
+    toret = rsa1_loadpub_s(BinarySource_UPCAST(lf), bs,
                                commentptr, errorstr);
     lf_free(lf);
     return toret;
@@ -418,12 +423,14 @@ strbuf *rsa1_save_sb(RSAKey *key, const char *passphrase)
  */
 bool rsa1_save_f(const Filename *filename, RSAKey *key, const char *passphrase)
 {
+    strbuf *buf;
+    bool toret;
     FILE *fp = f_open(filename, "wb", true);
     if (!fp)
         return false;
 
-    strbuf *buf = rsa1_save_sb(key, passphrase);
-    bool toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
+    buf = rsa1_save_sb(key, passphrase);
+    toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
     if (fclose(fp))
         toret = false;
     strbuf_free(buf);
@@ -883,13 +890,14 @@ ssh2_userkey *ppk_load_s(BinarySource *src, const char *passphrase,
 ssh2_userkey *ppk_load_f(const Filename *filename, const char *passphrase,
                          const char **errorstr)
 {
+    ssh2_userkey *toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf) {
         *errorstr = "can't open file";
         return NULL;
     }
 
-    ssh2_userkey *toret = ppk_load_s(BinarySource_UPCAST(lf),
+    toret = ppk_load_s(BinarySource_UPCAST(lf),
                                      passphrase, errorstr);
     lf_free(lf);
     return toret;
@@ -1191,13 +1199,14 @@ bool ppk_loadpub_s(BinarySource *src, char **algorithm, BinarySink *bs,
 bool ppk_loadpub_f(const Filename *filename, char **algorithm, BinarySink *bs,
                    char **commentptr, const char **errorstr)
 {
+    bool toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf) {
         *errorstr = "can't open file";
         return false;
     }
 
-    bool toret = ppk_loadpub_s(BinarySource_UPCAST(lf), algorithm, bs,
+    toret = ppk_loadpub_s(BinarySource_UPCAST(lf), algorithm, bs,
                                commentptr, errorstr);
     lf_free(lf);
     return toret;
@@ -1253,6 +1262,7 @@ bool ppk_encrypted_s(BinarySource *src, char **commentptr)
 
 bool ppk_encrypted_f(const Filename *filename, char **commentptr)
 {
+    bool toret;
     LoadedFile *lf = lf_load_keyfile(filename);
     if (!lf) {
         if (commentptr)
@@ -1260,7 +1270,7 @@ bool ppk_encrypted_f(const Filename *filename, char **commentptr)
         return false;
     }
 
-    bool toret = ppk_encrypted_s(BinarySource_UPCAST(lf), commentptr);
+    toret = ppk_encrypted_s(BinarySource_UPCAST(lf), commentptr);
     lf_free(lf);
     return toret;
 }
@@ -1304,7 +1314,7 @@ void base64_encode(FILE *fp, const unsigned char *data, int datalen, int cpl)
 
 strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase)
 {
-    strbuf *pub_blob, *priv_blob;
+    strbuf *pub_blob, *priv_blob, *out;
     unsigned char *priv_blob_encrypted;
     int priv_encrypted_len;
     int cipherblk;
@@ -1344,6 +1354,7 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase)
 
     /* Now create the MAC. */
     {
+        ssh_hash *h;
         strbuf *macdata;
         unsigned char mackey[20];
         char header[] = "putty-private-key-file-mac-key";
@@ -1355,7 +1366,7 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase)
         put_string(macdata, pub_blob->s, pub_blob->len);
         put_string(macdata, priv_blob_encrypted, priv_encrypted_len);
 
-        ssh_hash *h = ssh_hash_new(&ssh_sha1);
+        h = ssh_hash_new(&ssh_sha1);
         put_data(h, header, sizeof(header)-1);
         if (passphrase)
             put_data(h, passphrase, strlen(passphrase));
@@ -1375,7 +1386,7 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase)
         smemclr(key, sizeof(key));
     }
 
-    strbuf *out = strbuf_new_nm();
+    out = strbuf_new_nm();
     strbuf_catf(out, "PuTTY-User-Key-File-2: %s\n", ssh_key_ssh_id(key->key));
     strbuf_catf(out, "Encryption: %s\n", cipherstr);
     strbuf_catf(out, "Comment: %s\n", key->comment);
@@ -1399,12 +1410,14 @@ strbuf *ppk_save_sb(ssh2_userkey *key, const char *passphrase)
 bool ppk_save_f(const Filename *filename, ssh2_userkey *key,
                 const char *passphrase)
 {
+    strbuf *buf;
+    bool toret;
     FILE *fp = f_open(filename, "wb", true);
     if (!fp)
         return false;
 
-    strbuf *buf = ppk_save_sb(key, passphrase);
-    bool toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
+    buf = ppk_save_sb(key, passphrase);
+    toret = fwrite(buf->s, 1, buf->len, fp) == buf->len;
     if (fclose(fp))
         toret = false;
     strbuf_free(buf);
@@ -1649,11 +1662,12 @@ static int key_type_s(BinarySource *src)
 
 int key_type(const Filename *filename)
 {
+    int toret;
     LoadedFile *lf = lf_load(filename, 1024, true);
     if (!lf)
         return SSH_KEYTYPE_UNOPENABLE;
 
-    int toret = key_type_s(BinarySource_UPCAST(lf));
+    toret = key_type_s(BinarySource_UPCAST(lf));
     lf_free(lf);
     return toret;
 }

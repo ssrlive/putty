@@ -170,9 +170,10 @@ static inline void sha256_block_pad(sha256_block *blk, BinarySink *bs)
 {
     uint64_t final_len = blk->len << 3;
     size_t pad = 1 + (63 & (55 - blk->used));
+    size_t i;
 
     put_byte(bs, 0x80);
-    for (size_t i = 1; i < pad; i++)
+    for (i = 1; i < pad; i++)
         put_byte(bs, 0);
     put_uint64(bs, final_len);
 
@@ -236,17 +237,18 @@ static void sha256_sw_block(uint32_t *core, const uint8_t *block)
 {
     uint32_t w[SHA256_ROUNDS];
     uint32_t a,b,c,d,e,f,g,h;
+    size_t t;
 
-    for (size_t t = 0; t < 16; t++)
+    for (t = 0; t < 16; t++)
         w[t] = GET_32BIT_MSB_FIRST(block + 4*t);
 
-    for (size_t t = 16; t < SHA256_ROUNDS; t++)
+    for (t = 16; t < SHA256_ROUNDS; t++)
         w[t] = sigma_1(w[t-2]) + w[t-7] + sigma_0(w[t-15]) + w[t-16];
 
     a = core[0]; b = core[1]; c = core[2]; d = core[3];
     e = core[4]; f = core[5]; g = core[6]; h = core[7];
 
-    for (size_t t = 0; t < SHA256_ROUNDS; t += 8) {
+    for (t = 0; t < SHA256_ROUNDS; t += 8) {
         sha256_sw_round(t+0, w, &a,&b,&c,&d,&e,&f,&g,&h);
         sha256_sw_round(t+1, w, &h,&a,&b,&c,&d,&e,&f,&g);
         sha256_sw_round(t+2, w, &g,&h,&a,&b,&c,&d,&e,&f);
@@ -320,9 +322,10 @@ static void sha256_sw_write(BinarySink *bs, const void *vp, size_t len)
 static void sha256_sw_digest(ssh_hash *hash, uint8_t *digest)
 {
     sha256_sw *s = container_of(hash, sha256_sw, hash);
+    size_t i;
 
     sha256_block_pad(&s->blk, BinarySink_UPCAST(s));
-    for (size_t i = 0; i < 8; i++)
+    for (i = 0; i < 8; i++)
         PUT_32BIT_MSB_FIRST(digest + 4*i, s->core[i]);
 }
 
