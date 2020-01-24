@@ -179,8 +179,8 @@ bool dlg_is_visible(union control *ctrl, dlgparam *dp) { return false; }
 
 const char *const appname = "FuZZterm";
 const int ngsslibs = 0;
-const char *const gsslibnames[0] = { };
-const struct keyvalwhere gsslibkeywords[0] = { };
+const char *const gsslibnames[1] = { 0 };
+const struct keyvalwhere gsslibkeywords[1] = { 0 };
 
 /*
  * Default settings that are specific to Unix plink.
@@ -206,7 +206,7 @@ int platform_default_i(const char *name, int def)
 
 FontSpec *platform_default_fontspec(const char *name)
 {
-    return fontspec_new("");
+    return fontspec_new("", false, 0, 0);
 }
 
 Filename *platform_default_filename(const char *name)

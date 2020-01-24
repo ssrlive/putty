@@ -22,7 +22,7 @@
     <SccProjectName />
     <SccLocalPath />
     <ProjectGuid>{e3b27eef-8aa7-4778-85f5-d7a9bea67f23}</ProjectGuid>
-    <WindowsTargetPlatformVersion>5.2</WindowsTargetPlatformVersion>
+    <ProjectName>testzlib</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -83,7 +83,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Midl>
       <SuppressStartupBanner>true</SuppressStartupBanner>
@@ -112,7 +112,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Midl>
       <SuppressStartupBanner>true</SuppressStartupBanner>
@@ -141,7 +141,7 @@
       <MinimalRebuild>true</MinimalRebuild>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
     </ClCompile>
     <Midl>
@@ -198,26 +198,32 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\..\conf.c" />
+    <ClCompile Include="..\..\..\ecc.c" />
     <ClCompile Include="..\..\..\marshal.c" />
-    <ClCompile Include="..\..\..\misc.c" />
-    <ClCompile Include="..\..\..\sshbn.c" />
-    <ClCompile Include="..\..\..\testbn.c" />
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\mpint.c" />
+    <ClCompile Include="..\..\..\sshdes.c" />
+    <ClCompile Include="..\..\..\sshzlib.c" />
+    <ClCompile Include="..\..\..\testback.c" />
+    <ClCompile Include="..\..\..\testzlib.c" />
     <ClCompile Include="..\..\..\tree234.c" />
+    <ClCompile Include="..\..\..\utils.c" />
     <ClCompile Include="..\..\..\version.c" />
+    <ClCompile Include="..\..\winhelp.c" />
     <ClCompile Include="..\..\winmisc.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h" />
-    <ClInclude Include="..\..\..\empty.h" />
-    <ClInclude Include="..\..\..\int64.h" />
+    <ClInclude Include="..\..\..\ecc.h" />
     <ClInclude Include="..\..\..\marshal.h" />
     <ClInclude Include="..\..\..\misc.h" />
+    <ClInclude Include="..\..\..\mpint.h" />
     <ClInclude Include="..\..\..\network.h" />
     <ClInclude Include="..\..\..\putty.h" />
     <ClInclude Include="..\..\..\puttymem.h" />
     <ClInclude Include="..\..\..\puttyps.h" />
     <ClInclude Include="..\..\..\ssh.h" />
-    <ClInclude Include="..\..\..\sshbn.h" />
     <ClInclude Include="..\..\..\tree234.h" />
     <ClInclude Include="..\..\..\unix\unix.h" />
     <ClInclude Include="..\..\..\version.h" />

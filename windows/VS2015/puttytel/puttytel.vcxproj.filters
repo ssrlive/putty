@@ -41,9 +41,6 @@
     <ClCompile Include="..\..\..\ldisc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\ldiscucs.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\logging.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -164,18 +161,17 @@
     <ClCompile Include="..\..\..\marshal.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\utils.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
+    <ClCompile Include="..\..\winselgui.c" />
+    <ClCompile Include="..\..\..\stripctrl.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\dialog.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\empty.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\ldisc.h">

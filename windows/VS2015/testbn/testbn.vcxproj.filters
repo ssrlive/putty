@@ -4,15 +4,6 @@
     <ClCompile Include="..\..\..\conf.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\misc.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\sshbn.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\testbn.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\tree234.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -25,15 +16,19 @@
     <ClCompile Include="..\..\..\marshal.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\utils.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
+    <ClCompile Include="..\..\winhelp.c" />
+    <ClCompile Include="..\..\..\ecc.c" />
+    <ClCompile Include="..\..\..\mpint.c" />
+    <ClCompile Include="..\..\..\sshdes.c" />
+    <ClCompile Include="..\..\..\testback.c" />
+    <ClCompile Include="..\..\..\testzlib.c" />
+    <ClCompile Include="..\..\..\sshzlib.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\empty.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\misc.h">
@@ -54,9 +49,6 @@
     <ClInclude Include="..\..\..\ssh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\sshbn.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\tree234.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -75,6 +67,8 @@
     <ClInclude Include="..\..\..\marshal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\ecc.h" />
+    <ClInclude Include="..\..\..\mpint.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">

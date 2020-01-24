@@ -32,9 +32,6 @@
     <ClCompile Include="..\..\..\sshblowf.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\sshbn.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\sshdes.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -116,18 +113,20 @@
     <ClCompile Include="..\..\..\marshal.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\utils.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
+    <ClCompile Include="..\..\..\sshauxcrypt.c" />
+    <ClCompile Include="..\..\..\mpint.c" />
+    <ClCompile Include="..\..\..\ecc.c" />
+    <ClCompile Include="..\..\..\sshhmac.c" />
+    <ClCompile Include="..\..\..\sshprng.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\dialog.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\empty.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\licence.h">
@@ -152,9 +151,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\sshblowf.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\sshbn.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\storage.h">
@@ -184,6 +180,8 @@
     <ClInclude Include="..\..\..\marshal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\mpint.h" />
+    <ClInclude Include="..\..\..\ecc.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">

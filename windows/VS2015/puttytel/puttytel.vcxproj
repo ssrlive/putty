@@ -22,7 +22,6 @@
     <SccProjectName />
     <SccLocalPath />
     <ProjectGuid>{b7dd98ff-b336-4d23-9c07-e5fa7a9f3130}</ProjectGuid>
-    <WindowsTargetPlatformVersion>5.2</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -83,7 +82,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Midl>
       <SuppressStartupBanner>true</SuppressStartupBanner>
@@ -114,7 +113,7 @@
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <WarningLevel>Level3</WarningLevel>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Midl>
       <SuppressStartupBanner>true</SuppressStartupBanner>
@@ -145,7 +144,7 @@
       <MinimalRebuild>true</MinimalRebuild>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <AdditionalIncludeDirectories>../../..;../../../charset;../../../windows;../../../unix;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;POSIX;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_DEPRECATE;_WIN32_WINNT=_WIN32_WINNT_WINXP;inline=__inline;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
     </ClCompile>
     <Midl>
@@ -222,9 +221,9 @@
     <ClCompile Include="..\..\..\dialog.c" />
     <ClCompile Include="..\..\..\errsock.c" />
     <ClCompile Include="..\..\..\ldisc.c" />
-    <ClCompile Include="..\..\..\ldiscucs.c" />
     <ClCompile Include="..\..\..\logging.c" />
     <ClCompile Include="..\..\..\marshal.c" />
+    <ClCompile Include="..\..\..\memory.c" />
     <ClCompile Include="..\..\..\minibidi.c" />
     <ClCompile Include="..\..\..\misc.c" />
     <ClCompile Include="..\..\..\miscucs.c" />
@@ -237,10 +236,12 @@
     <ClCompile Include="..\..\..\sercfg.c" />
     <ClCompile Include="..\..\..\sessprep.c" />
     <ClCompile Include="..\..\..\settings.c" />
+    <ClCompile Include="..\..\..\stripctrl.c" />
     <ClCompile Include="..\..\..\telnet.c" />
     <ClCompile Include="..\..\..\terminal.c" />
     <ClCompile Include="..\..\..\timing.c" />
     <ClCompile Include="..\..\..\tree234.c" />
+    <ClCompile Include="..\..\..\utils.c" />
     <ClCompile Include="..\..\..\version.c" />
     <ClCompile Include="..\..\..\wcwidth.c" />
     <ClCompile Include="..\..\sizetip.c" />
@@ -254,10 +255,12 @@
     <ClCompile Include="..\..\winhsock.c" />
     <ClCompile Include="..\..\winjump.c" />
     <ClCompile Include="..\..\winmisc.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
     <ClCompile Include="..\..\winnet.c" />
     <ClCompile Include="..\..\winprint.c" />
     <ClCompile Include="..\..\winproxy.c" />
     <ClCompile Include="..\..\winsecur.c" />
+    <ClCompile Include="..\..\winselgui.c" />
     <ClCompile Include="..\..\winser.c" />
     <ClCompile Include="..\..\winstore.c" />
     <ClCompile Include="..\..\wintime.c" />
@@ -267,8 +270,6 @@
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h" />
     <ClInclude Include="..\..\..\dialog.h" />
-    <ClInclude Include="..\..\..\empty.h" />
-    <ClInclude Include="..\..\..\int64.h" />
     <ClInclude Include="..\..\..\ldisc.h" />
     <ClInclude Include="..\..\..\licence.h" />
     <ClInclude Include="..\..\..\marshal.h" />

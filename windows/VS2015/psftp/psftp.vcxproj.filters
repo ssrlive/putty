@@ -35,9 +35,6 @@
     <ClCompile Include="..\..\..\errsock.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\int64.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\logging.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -78,9 +75,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\sshblowf.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\..\sshbn.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\..\sshccp.c">
@@ -230,15 +224,37 @@
     <ClCompile Include="..\..\..\nullplug.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\wcwidth.c" />
+    <ClCompile Include="..\..\..\agentf.c" />
+    <ClCompile Include="..\..\..\ecc.c" />
+    <ClCompile Include="..\..\..\mainchan.c" />
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\mpint.c" />
+    <ClCompile Include="..\..\..\psftpcommon.c" />
+    <ClCompile Include="..\..\..\sftpcommon.c" />
+    <ClCompile Include="..\..\..\ssh1connection.c" />
+    <ClCompile Include="..\..\..\ssh1connection-client.c" />
+    <ClCompile Include="..\..\..\ssh1login.c" />
+    <ClCompile Include="..\..\..\ssh2connection.c" />
+    <ClCompile Include="..\..\..\ssh2connection-client.c" />
+    <ClCompile Include="..\..\..\ssh2kex-client.c" />
+    <ClCompile Include="..\..\..\ssh2transhk.c" />
+    <ClCompile Include="..\..\..\ssh2transport.c" />
+    <ClCompile Include="..\..\..\ssh2userauth.c" />
+    <ClCompile Include="..\..\..\sshauxcrypt.c" />
+    <ClCompile Include="..\..\..\sshcommon.c" />
+    <ClCompile Include="..\..\..\sshhmac.c" />
+    <ClCompile Include="..\..\..\sshmac.c" />
+    <ClCompile Include="..\..\..\sshprng.c" />
+    <ClCompile Include="..\..\..\sshverstring.c" />
+    <ClCompile Include="..\..\..\stripctrl.c" />
+    <ClCompile Include="..\..\..\utils.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
+    <ClCompile Include="..\..\winselcli.c" />
+    <ClCompile Include="..\..\winhelp.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\empty.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\licence.h">
@@ -283,9 +299,6 @@
     <ClInclude Include="..\..\..\sshblowf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\sshbn.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\sshgss.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -328,6 +341,11 @@
     <ClInclude Include="..\..\..\sshbpp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\ecc.h" />
+    <ClInclude Include="..\..\..\mpint.h" />
+    <ClInclude Include="..\..\..\ssh1connection.h" />
+    <ClInclude Include="..\..\..\ssh2connection.h" />
+    <ClInclude Include="..\..\..\ssh2transport.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">

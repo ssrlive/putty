@@ -29,9 +29,6 @@
     <ClCompile Include="..\..\..\sshaes.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\..\sshbn.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\..\sshdes.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -86,15 +83,26 @@
     <ClCompile Include="..\..\..\marshal.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\..\memory.c" />
+    <ClCompile Include="..\..\..\utils.c" />
+    <ClCompile Include="..\..\winmiscs.c" />
+    <ClCompile Include="..\..\..\mpint.c" />
+    <ClCompile Include="..\..\..\sshauxcrypt.c" />
+    <ClCompile Include="..\..\..\ecc.c" />
+    <ClCompile Include="..\..\..\sshhmac.c" />
+    <ClCompile Include="..\..\winselgui.c" />
+    <ClCompile Include="..\..\winnps.c" />
+    <ClCompile Include="..\..\winnet.c" />
+    <ClCompile Include="..\..\..\callback.c" />
+    <ClCompile Include="..\..\winhsock.c" />
+    <ClCompile Include="..\..\winhandl.c" />
+    <ClCompile Include="..\..\..\be_misc.c" />
+    <ClCompile Include="..\..\winnpc.c" />
+    <ClCompile Include="..\..\..\errsock.c" />
+    <ClCompile Include="..\..\wincapi.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\..\charset\charset.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\empty.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\..\int64.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\..\licence.h">
@@ -121,9 +129,6 @@
     <ClInclude Include="..\..\..\ssh.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\..\sshbn.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\..\tree234.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -148,6 +153,9 @@
     <ClInclude Include="..\..\..\marshal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\..\mpint.h" />
+    <ClInclude Include="..\..\..\ecc.h" />
+    <ClInclude Include="..\..\wincapi.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Source Files">
