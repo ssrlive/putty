@@ -141,6 +141,8 @@ void ecc_weierstrass_point_free(WeierstrassPoint *wp)
 WeierstrassPoint *ecc_weierstrass_point_new_from_x(
     WeierstrassCurve *wc, mp_int *xorig, unsigned desired_y_parity)
 {
+    unsigned success, flip;
+    mp_int *x, *x2, *x2_plus_a, *x3_plus_ax, *rhs, *y, *tmp;
     assert(wc->sc);
 
     /*
@@ -148,24 +150,23 @@ WeierstrassPoint *ecc_weierstrass_point_new_from_x(
      * conveniently in a form where we can compute the RHS and take
      * the square root of it to get y.
      */
-    unsigned success;
 
-    mp_int *x = monty_import(wc->mc, xorig);
+    x = monty_import(wc->mc, xorig);
 
     /*
      * Compute the RHS of the curve equation. We don't need to take
      * account of z here, because we're constructing the point from
      * scratch. So it really is just x^3 + ax + b.
      */
-    mp_int *x2 = monty_mul(wc->mc, x, x);
-    mp_int *x2_plus_a = monty_add(wc->mc, x2, wc->a);
-    mp_int *x3_plus_ax = monty_mul(wc->mc, x2_plus_a, x);
-    mp_int *rhs = monty_add(wc->mc, x3_plus_ax, wc->b);
+    x2 = monty_mul(wc->mc, x, x);
+    x2_plus_a = monty_add(wc->mc, x2, wc->a);
+    x3_plus_ax = monty_mul(wc->mc, x2_plus_a, x);
+    rhs = monty_add(wc->mc, x3_plus_ax, wc->b);
     mp_free(x2);
     mp_free(x2_plus_a);
     mp_free(x3_plus_ax);
 
-    mp_int *y = monty_modsqrt(wc->sc, rhs, &success);
+    y = monty_modsqrt(wc->sc, rhs, &success);
     mp_free(rhs);
 
     if (!success) {
@@ -183,8 +184,8 @@ WeierstrassPoint *ecc_weierstrass_point_new_from_x(
      * Choose whichever of y and p-y has the specified parity (of its
      * lowest positive residue mod p).
      */
-    mp_int *tmp = monty_export(wc->mc, y);
-    unsigned flip = (mp_get_bit(tmp, 0) ^ desired_y_parity) & 1;
+    tmp = monty_export(wc->mc, y);
+    flip = (mp_get_bit(tmp, 0) ^ desired_y_parity) & 1;
     mp_sub_into(tmp, wc->p, y);
     mp_select_into(y, y, tmp, flip);
     mp_free(tmp);
@@ -219,6 +220,7 @@ static inline void ecc_weierstrass_epilogue(
     mp_int *Px, mp_int *Qx, mp_int *Py, mp_int *common_Z,
     mp_int *lambda_n, mp_int *lambda_d, WeierstrassPoint *out)
 {
+    mp_int *lambda_d2_Px, *xdiff, *lambda_n_xdiff, *lambda_d3_Py;
     WeierstrassCurve *wc = out->wc;
 
     /* Powers of the numerator and denominator of the slope lambda */
@@ -232,10 +234,10 @@ static inline void ecc_weierstrass_epilogue(
     out->X = monty_sub(wc->mc, lambda_n2, lambda_d2_xsum);
 
     /* Make the output y-coordinate */
-    mp_int *lambda_d2_Px = monty_mul(wc->mc, lambda_d2, Px);
-    mp_int *xdiff = monty_sub(wc->mc, lambda_d2_Px, out->X);
-    mp_int *lambda_n_xdiff = monty_mul(wc->mc, lambda_n, xdiff);
-    mp_int *lambda_d3_Py = monty_mul(wc->mc, lambda_d3, Py);
+    lambda_d2_Px = monty_mul(wc->mc, lambda_d2, Px);
+    xdiff = monty_sub(wc->mc, lambda_d2_Px, out->X);
+    lambda_n_xdiff = monty_mul(wc->mc, lambda_n, xdiff);
+    lambda_d3_Py = monty_mul(wc->mc, lambda_d3, Py);
     out->Y = monty_sub(wc->mc, lambda_n_xdiff, lambda_d3_Py);
 
     /* Make the output z-coordinate */
@@ -265,6 +267,7 @@ static inline void ecc_weierstrass_add_prologue(
     mp_int **lambda_n, mp_int **lambda_d)
 {
     WeierstrassCurve *wc = P->wc;
+    mp_int *Qy;
 
     /* Powers of the points' denominators */
     mp_int *Pz2 = monty_mul(wc->mc, P->Z, P->Z);
@@ -277,7 +280,7 @@ static inline void ecc_weierstrass_add_prologue(
     *Px = monty_mul(wc->mc, P->X, Qz2);
     *Py = monty_mul(wc->mc, P->Y, Qz3);
     *Qx = monty_mul(wc->mc, Q->X, Pz2);
-    mp_int *Qy = monty_mul(wc->mc, Q->Y, Pz3);
+    Qy = monty_mul(wc->mc, Q->Y, Pz3);
 
     /* Common denominator */
     *denom = monty_mul(wc->mc, P->Z, Q->Z);
@@ -295,12 +298,13 @@ static inline void ecc_weierstrass_add_prologue(
 
 WeierstrassPoint *ecc_weierstrass_add(WeierstrassPoint *P, WeierstrassPoint *Q)
 {
+    mp_int *Px, *Py, *Qx, *denom, *lambda_n, *lambda_d;
+    WeierstrassPoint *S;
     WeierstrassCurve *wc = P->wc;
     assert(Q->wc == wc);
 
-    WeierstrassPoint *S = ecc_weierstrass_point_new_empty(wc);
+    S = ecc_weierstrass_point_new_empty(wc);
 
-    mp_int *Px, *Py, *Qx, *denom, *lambda_n, *lambda_d;
     ecc_weierstrass_add_prologue(
         P, Q, &Px, &Py, &Qx, &denom, &lambda_n, &lambda_d);
 
@@ -380,24 +384,27 @@ static inline void ecc_weierstrass_select_into(
 WeierstrassPoint *ecc_weierstrass_add_general(
     WeierstrassPoint *P, WeierstrassPoint *Q)
 {
+    WeierstrassPoint *S;
+    mp_int *Px, *Py, *Qx, *denom, *lambda_n, *lambda_d;
+    mp_int *lambda_n_tangent, *lambda_d_tangent;
+    unsigned same_x_coord, same_y_coord, equality, output_id;
+
     WeierstrassCurve *wc = P->wc;
     assert(Q->wc == wc);
 
-    WeierstrassPoint *S = ecc_weierstrass_point_new_empty(wc);
+    S = ecc_weierstrass_point_new_empty(wc);
 
     /* Parameters for the epilogue, and slope of the line if P != Q */
-    mp_int *Px, *Py, *Qx, *denom, *lambda_n, *lambda_d;
     ecc_weierstrass_add_prologue(
         P, Q, &Px, &Py, &Qx, &denom, &lambda_n, &lambda_d);
 
     /* Slope if P == Q */
-    mp_int *lambda_n_tangent, *lambda_d_tangent;
     ecc_weierstrass_tangent_slope(P, &lambda_n_tangent, &lambda_d_tangent);
 
     /* Select between those slopes depending on whether P == Q */
-    unsigned same_x_coord = mp_eq_integer(lambda_d, 0);
-    unsigned same_y_coord = mp_eq_integer(lambda_n, 0);
-    unsigned equality = same_x_coord & same_y_coord;
+    same_x_coord = mp_eq_integer(lambda_d, 0);
+    same_y_coord = mp_eq_integer(lambda_n, 0);
+    equality = same_x_coord & same_y_coord;
     mp_select_into(lambda_n, lambda_n, lambda_n_tangent, equality);
     mp_select_into(lambda_d, lambda_d, lambda_d_tangent, equality);
 
@@ -415,7 +422,7 @@ WeierstrassPoint *ecc_weierstrass_add_general(
      * z==0 already. Detect that and use it to normalise the other two
      * coordinates to zero.
      */
-    unsigned output_id = mp_eq_integer(S->Z, 0);
+    output_id = mp_eq_integer(S->Z, 0);
     mp_cond_clear(S->X, output_id);
     mp_cond_clear(S->Y, output_id);
 
@@ -445,13 +452,14 @@ WeierstrassPoint *ecc_weierstrass_multiply(WeierstrassPoint *B, mp_int *n)
      * the comment in ecc_montgomery_multiply.
      */
 
+    size_t bitindex;
     unsigned not_started_yet = 1;
-    for (size_t bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
+    for (bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
         unsigned nbit = mp_get_bit(n, bitindex);
-
+        WeierstrassPoint *other;
         WeierstrassPoint *sum = ecc_weierstrass_add(k_B, kplus1_B);
         ecc_weierstrass_cond_swap(k_B, kplus1_B, nbit);
-        WeierstrassPoint *other = ecc_weierstrass_double(k_B);
+        other = ecc_weierstrass_double(k_B);
         ecc_weierstrass_point_free(k_B);
         ecc_weierstrass_point_free(kplus1_B);
         k_B = other;
@@ -572,17 +580,18 @@ struct MontgomeryCurve {
 MontgomeryCurve *ecc_montgomery_curve(
     mp_int *p, mp_int *a, mp_int *b)
 {
+    mp_int *four, *fourinverse, *aplus2, *aplus2over4;
     MontgomeryCurve *mc = snew(MontgomeryCurve);
     mc->p = mp_copy(p);
     mc->mc = monty_new(p);
     mc->a = monty_import(mc->mc, a);
     mc->b = monty_import(mc->mc, b);
 
-    mp_int *four = mp_from_integer(4);
-    mp_int *fourinverse = mp_invert(four, mc->p);
-    mp_int *aplus2 = mp_copy(a);
+    four = mp_from_integer(4);
+    fourinverse = mp_invert(four, mc->p);
+    aplus2 = mp_copy(a);
     mp_add_integer_into(aplus2, aplus2, 2);
-    mp_int *aplus2over4 = mp_modmul(aplus2, fourinverse, mc->p);
+    aplus2over4 = mp_modmul(aplus2, fourinverse, mc->p);
     mc->aplus2over4 = monty_import(mc->mc, aplus2over4);
     mp_free(four);
     mp_free(fourinverse);
@@ -658,6 +667,9 @@ static void ecc_montgomery_cond_swap(
 MontgomeryPoint *ecc_montgomery_diff_add(
     MontgomeryPoint *P, MontgomeryPoint *Q, MontgomeryPoint *PminusQ)
 {
+    MontgomeryPoint *S;
+    mp_int *Px_m_Pz, *Px_p_Pz, *Qx_m_Qz, *Qx_p_Qz, *PmQp, *PpQm, *Xpre, *Zpre, *Xpre2, *Zpre2;
+
     MontgomeryCurve *mc = P->mc;
     assert(Q->mc == mc);
     assert(PminusQ->mc == mc);
@@ -673,18 +685,18 @@ MontgomeryPoint *ecc_montgomery_diff_add(
      * do a division during the main arithmetic.
      */
 
-    MontgomeryPoint *S = ecc_montgomery_point_new_empty(mc);
+    S = ecc_montgomery_point_new_empty(mc);
 
-    mp_int *Px_m_Pz = monty_sub(mc->mc, P->X, P->Z);
-    mp_int *Px_p_Pz = monty_add(mc->mc, P->X, P->Z);
-    mp_int *Qx_m_Qz = monty_sub(mc->mc, Q->X, Q->Z);
-    mp_int *Qx_p_Qz = monty_add(mc->mc, Q->X, Q->Z);
-    mp_int *PmQp = monty_mul(mc->mc, Px_m_Pz, Qx_p_Qz);
-    mp_int *PpQm = monty_mul(mc->mc, Px_p_Pz, Qx_m_Qz);
-    mp_int *Xpre = monty_add(mc->mc, PmQp, PpQm);
-    mp_int *Zpre = monty_sub(mc->mc, PmQp, PpQm);
-    mp_int *Xpre2 = monty_mul(mc->mc, Xpre, Xpre);
-    mp_int *Zpre2 = monty_mul(mc->mc, Zpre, Zpre);
+    Px_m_Pz = monty_sub(mc->mc, P->X, P->Z);
+    Px_p_Pz = monty_add(mc->mc, P->X, P->Z);
+    Qx_m_Qz = monty_sub(mc->mc, Q->X, Q->Z);
+    Qx_p_Qz = monty_add(mc->mc, Q->X, Q->Z);
+    PmQp = monty_mul(mc->mc, Px_m_Pz, Qx_p_Qz);
+    PpQm = monty_mul(mc->mc, Px_p_Pz, Qx_m_Qz);
+    Xpre = monty_add(mc->mc, PmQp, PpQm);
+    Zpre = monty_sub(mc->mc, PmQp, PpQm);
+    Xpre2 = monty_mul(mc->mc, Xpre, Xpre);
+    Zpre2 = monty_mul(mc->mc, Zpre, Zpre);
     S->X = monty_mul(mc->mc, Xpre2, PminusQ->Z);
     S->Z = monty_mul(mc->mc, Zpre2, PminusQ->X);
 
@@ -706,6 +718,7 @@ MontgomeryPoint *ecc_montgomery_double(MontgomeryPoint *P)
 {
     MontgomeryCurve *mc = P->mc;
     MontgomeryPoint *D = ecc_montgomery_point_new_empty(mc);
+    mp_int *Px_m_Pz, *Px_p_Pz, *Px_m_Pz_2, *Px_p_Pz_2, *XZ, *twoXZ, *fourXZ, *fourXZ_scaled, *Zpre;
 
     /*
      * To double a point in affine coordinates, in principle you can
@@ -729,16 +742,16 @@ MontgomeryPoint *ecc_montgomery_double(MontgomeryPoint *P)
      * form to avoid the division.
      */
 
-    mp_int *Px_m_Pz = monty_sub(mc->mc, P->X, P->Z);
-    mp_int *Px_p_Pz = monty_add(mc->mc, P->X, P->Z);
-    mp_int *Px_m_Pz_2 = monty_mul(mc->mc, Px_m_Pz, Px_m_Pz);
-    mp_int *Px_p_Pz_2 = monty_mul(mc->mc, Px_p_Pz, Px_p_Pz);
+    Px_m_Pz = monty_sub(mc->mc, P->X, P->Z);
+    Px_p_Pz = monty_add(mc->mc, P->X, P->Z);
+    Px_m_Pz_2 = monty_mul(mc->mc, Px_m_Pz, Px_m_Pz);
+    Px_p_Pz_2 = monty_mul(mc->mc, Px_p_Pz, Px_p_Pz);
     D->X = monty_mul(mc->mc, Px_m_Pz_2, Px_p_Pz_2);
-    mp_int *XZ = monty_mul(mc->mc, P->X, P->Z);
-    mp_int *twoXZ = monty_add(mc->mc, XZ, XZ);
-    mp_int *fourXZ = monty_add(mc->mc, twoXZ, twoXZ);
-    mp_int *fourXZ_scaled = monty_mul(mc->mc, fourXZ, mc->aplus2over4);
-    mp_int *Zpre = monty_add(mc->mc, Px_m_Pz_2, fourXZ_scaled);
+    XZ = monty_mul(mc->mc, P->X, P->Z);
+    twoXZ = monty_add(mc->mc, XZ, XZ);
+    fourXZ = monty_add(mc->mc, twoXZ, twoXZ);
+    fourXZ_scaled = monty_mul(mc->mc, fourXZ, mc->aplus2over4);
+    Zpre = monty_add(mc->mc, Px_m_Pz_2, fourXZ_scaled);
     D->Z = monty_mul(mc->mc, fourXZ, Zpre);
 
     mp_free(Px_m_Pz);
@@ -800,13 +813,14 @@ MontgomeryPoint *ecc_montgomery_multiply(MontgomeryPoint *B, mp_int *n)
     MontgomeryPoint *k_B = ecc_montgomery_point_copy(B);
     MontgomeryPoint *kplus1_B = ecc_montgomery_point_copy(two_B);
 
+    size_t bitindex;
     unsigned not_started_yet = 1;
-    for (size_t bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
+    for (bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
         unsigned nbit = mp_get_bit(n, bitindex);
-
+        MontgomeryPoint *other;
         MontgomeryPoint *sum = ecc_montgomery_diff_add(k_B, kplus1_B, B);
         ecc_montgomery_cond_swap(k_B, kplus1_B, nbit);
-        MontgomeryPoint *other = ecc_montgomery_double(k_B);
+        other = ecc_montgomery_double(k_B);
         ecc_montgomery_point_free(k_B);
         ecc_montgomery_point_free(kplus1_B);
         k_B = other;
@@ -950,6 +964,9 @@ void ecc_edwards_point_free(EdwardsPoint *ep)
 EdwardsPoint *ecc_edwards_point_new_from_y(
     EdwardsCurve *ec, mp_int *yorig, unsigned desired_x_parity)
 {
+    unsigned success, flip;
+    mp_int *y, *y2, *dy2, *dy2ma, *y2m1, *recip_denominator, *radicand, *x, *tmp;
+
     assert(ec->sc);
 
     /*
@@ -957,16 +974,15 @@ EdwardsPoint *ecc_edwards_point_new_from_y(
      * rearranges to x^2(dy^2-a) = y^2-1. So we compute
      * (y^2-1)/(dy^2-a) and take its square root.
      */
-    unsigned success;
 
-    mp_int *y = monty_import(ec->mc, yorig);
-    mp_int *y2 = monty_mul(ec->mc, y, y);
-    mp_int *dy2 = monty_mul(ec->mc, ec->d, y2);
-    mp_int *dy2ma = monty_sub(ec->mc, dy2, ec->a);
-    mp_int *y2m1 = monty_sub(ec->mc, y2, monty_identity(ec->mc));
-    mp_int *recip_denominator = monty_invert(ec->mc, dy2ma);
-    mp_int *radicand = monty_mul(ec->mc, y2m1, recip_denominator);
-    mp_int *x = monty_modsqrt(ec->sc, radicand, &success);
+    y = monty_import(ec->mc, yorig);
+    y2 = monty_mul(ec->mc, y, y);
+    dy2 = monty_mul(ec->mc, ec->d, y2);
+    dy2ma = monty_sub(ec->mc, dy2, ec->a);
+    y2m1 = monty_sub(ec->mc, y2, monty_identity(ec->mc));
+    recip_denominator = monty_invert(ec->mc, dy2ma);
+    radicand = monty_mul(ec->mc, y2m1, recip_denominator);
+    x = monty_modsqrt(ec->sc, radicand, &success);
     mp_free(y2);
     mp_free(dy2);
     mp_free(dy2ma);
@@ -989,8 +1005,8 @@ EdwardsPoint *ecc_edwards_point_new_from_y(
      * Choose whichever of x and p-x has the specified parity (of its
      * lowest positive residue mod p).
      */
-    mp_int *tmp = monty_export(ec->mc, x);
-    unsigned flip = (mp_get_bit(tmp, 0) ^ desired_x_parity) & 1;
+    tmp = monty_export(ec->mc, x);
+    flip = (mp_get_bit(tmp, 0) ^ desired_x_parity) & 1;
     mp_sub_into(tmp, ec->p, x);
     mp_select_into(x, x, tmp, flip);
     mp_free(tmp);
@@ -1018,10 +1034,13 @@ static void ecc_edwards_cond_swap(
 
 EdwardsPoint *ecc_edwards_add(EdwardsPoint *P, EdwardsPoint *Q)
 {
+    EdwardsPoint *S;
+    mp_int *PxQx, *PyQy, *PtQt, *PzQz, *Psum, *Qsum, *aPxQx, *dPtQt, *sumprod, *xx_p_yy, *E, *F, *G, *H;
+
     EdwardsCurve *ec = P->ec;
     assert(Q->ec == ec);
 
-    EdwardsPoint *S = ecc_edwards_point_new_empty(ec);
+    S = ecc_edwards_point_new_empty(ec);
 
     /*
      * The affine rule for Edwards addition of (x1,y1) and (x2,y2) is
@@ -1040,20 +1059,20 @@ EdwardsPoint *ecc_edwards_add(EdwardsPoint *P, EdwardsPoint *Q)
      *   Z_out = (Z1 Z2 - d T1 T2) (Z1 Z2 + d T1 T2)
      *   T_out = (X1 Y2 +   Y1 X2) (Y1 Y2 - a X1 X2)
      */
-    mp_int *PxQx = monty_mul(ec->mc, P->X, Q->X);
-    mp_int *PyQy = monty_mul(ec->mc, P->Y, Q->Y);
-    mp_int *PtQt = monty_mul(ec->mc, P->T, Q->T);
-    mp_int *PzQz = monty_mul(ec->mc, P->Z, Q->Z);
-    mp_int *Psum = monty_add(ec->mc, P->X, P->Y);
-    mp_int *Qsum = monty_add(ec->mc, Q->X, Q->Y);
-    mp_int *aPxQx = monty_mul(ec->mc, ec->a, PxQx);
-    mp_int *dPtQt = monty_mul(ec->mc, ec->d, PtQt);
-    mp_int *sumprod = monty_mul(ec->mc, Psum, Qsum);
-    mp_int *xx_p_yy = monty_add(ec->mc, PxQx, PyQy);
-    mp_int *E = monty_sub(ec->mc, sumprod, xx_p_yy);
-    mp_int *F = monty_sub(ec->mc, PzQz, dPtQt);
-    mp_int *G = monty_add(ec->mc, PzQz, dPtQt);
-    mp_int *H = monty_sub(ec->mc, PyQy, aPxQx);
+    PxQx = monty_mul(ec->mc, P->X, Q->X);
+    PyQy = monty_mul(ec->mc, P->Y, Q->Y);
+    PtQt = monty_mul(ec->mc, P->T, Q->T);
+    PzQz = monty_mul(ec->mc, P->Z, Q->Z);
+    Psum = monty_add(ec->mc, P->X, P->Y);
+    Qsum = monty_add(ec->mc, Q->X, Q->Y);
+    aPxQx = monty_mul(ec->mc, ec->a, PxQx);
+    dPtQt = monty_mul(ec->mc, ec->d, PtQt);
+    sumprod = monty_mul(ec->mc, Psum, Qsum);
+    xx_p_yy = monty_add(ec->mc, PxQx, PyQy);
+    E = monty_sub(ec->mc, sumprod, xx_p_yy);
+    F = monty_sub(ec->mc, PzQz, dPtQt);
+    G = monty_add(ec->mc, PzQz, dPtQt);
+    H = monty_sub(ec->mc, PyQy, aPxQx);
     S->X = monty_mul(ec->mc, E, F);
     S->Z = monty_mul(ec->mc, F, G);
     S->Y = monty_mul(ec->mc, G, H);
@@ -1100,14 +1119,16 @@ EdwardsPoint *ecc_edwards_multiply(EdwardsPoint *B, mp_int *n)
      * any other technique and this way I didn't have to debug two of
      * them.
      */
+    size_t bitindex;
 
     unsigned not_started_yet = 1;
-    for (size_t bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
+    for (bitindex = mp_max_bits(n); bitindex-- > 0 ;) {
+        EdwardsPoint *other;
         unsigned nbit = mp_get_bit(n, bitindex);
 
         EdwardsPoint *sum = ecc_edwards_add(k_B, kplus1_B);
         ecc_edwards_cond_swap(k_B, kplus1_B, nbit);
-        EdwardsPoint *other = ecc_edwards_add(k_B, k_B);
+        other = ecc_edwards_add(k_B, k_B);
         ecc_edwards_point_free(k_B);
         ecc_edwards_point_free(kplus1_B);
         k_B = other;

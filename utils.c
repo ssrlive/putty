@@ -368,9 +368,10 @@ static char *dupvprintf_inner(char *buf, size_t oldlen, size_t *sizeptr,
     sgrowarrayn_nm(buf, size, oldlen, 512);
 
     while (1) {
+        int len;
         va_list aq;
         va_copy(aq, ap);
-        int len = vsnprintf(buf + oldlen, size - oldlen, fmt, aq);
+        len = vsnprintf(buf + oldlen, size - oldlen, fmt, aq);
         va_end(aq);
 
         if (len >= 0 && len < size) {
@@ -993,6 +994,7 @@ ptrlen ptrlen_get_word(ptrlen *input, const char *separators)
 {
     const char *p = input->ptr, *end = p + input->len;
     ptrlen toret;
+    size_t to_consume;
 
     while (p < end && strchr(separators, *p))
         p++;
@@ -1001,7 +1003,7 @@ ptrlen ptrlen_get_word(ptrlen *input, const char *separators)
         p++;
     toret.len = p - (const char *)toret.ptr;
 
-    size_t to_consume = p - (const char *)input->ptr;
+    to_consume = p - (const char *)input->ptr;
     assert(to_consume <= input->len);
     input->ptr = (const char *)input->ptr + to_consume;
     input->len -= to_consume;

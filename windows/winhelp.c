@@ -49,6 +49,7 @@ int has_embedded_chm(void)
 static bool find_chm_resource(void)
 {
     static bool checked = false;
+    HGLOBAL chm_hglobal;
     if (checked)       /* we've been here already */
         goto out;
     checked = true;
@@ -64,7 +65,7 @@ static bool find_chm_resource(void)
     if (chm_resource_size == 0)
         goto out;
 
-    HGLOBAL chm_hglobal = LoadResource(NULL, chm_hrsrc);
+    chm_hglobal = LoadResource(NULL, chm_hrsrc);
     if (chm_hglobal == NULL)
         goto out;
 
@@ -80,6 +81,11 @@ static bool load_chm_resource(void)
     char *filename = NULL;
     HANDLE filehandle = INVALID_HANDLE_VALUE;
     bool created = false;
+    char tempdir[MAX_PATH + 2];
+    unsigned long pid;
+    uint64_t counter;
+    const uint8_t *p;
+    DWORD pos;
 
     static bool tried_to_load = false;
     if (tried_to_load)
@@ -93,13 +99,12 @@ static bool load_chm_resource(void)
 
     /* GetTempPath is documented as returning a size of up to
      * MAX_PATH+1 which does not count the NUL */
-    char tempdir[MAX_PATH + 2];
     if (GetTempPath(sizeof(tempdir), tempdir) == 0)
         goto out;
 
-    unsigned long pid = GetCurrentProcessId();
+    pid = GetCurrentProcessId();
 
-    for (uint64_t counter = 0;; counter++) {
+    for (counter = 0;; counter++) {
         filename = dupprintf(
             "%s\\putty_%lu_%"PRIu64".chm", tempdir, pid, counter);
         filehandle = CreateFile(
@@ -117,8 +122,8 @@ static bool load_chm_resource(void)
     }
     created = true;
 
-    const uint8_t *p = (const uint8_t *)chm_resource;
-    for (DWORD pos = 0; pos < chm_resource_size; pos++) {
+    p = (const uint8_t *)chm_resource;
+    for (pos = 0; pos < chm_resource_size; pos++) {
         DWORD to_write = chm_resource_size - pos;
         DWORD written = 0;
 
@@ -143,12 +148,13 @@ static bool load_chm_resource(void)
 
 static bool find_chm_from_installation(void)
 {
+    size_t i;
     static const char *const reg_paths[] = {
         "Software\\SimonTatham\\PuTTY64\\CHMPath",
         "Software\\SimonTatham\\PuTTY\\CHMPath",
     };
 
-    for (size_t i = 0; i < lenof(reg_paths); i++) {
+    for (i = 0; i < lenof(reg_paths); i++) {
         char *filename = registry_get_string(
             HKEY_LOCAL_MACHINE, reg_paths[i], NULL);
 
@@ -164,6 +170,7 @@ static bool find_chm_from_installation(void)
 
 void init_help(void)
 {
+    HINSTANCE dllHH;
     /* Just in case of multiple calls */
     static bool already_called = false;
     if (already_called)
@@ -174,7 +181,7 @@ void init_help(void)
      * Don't even try looking for the CHM file if we can't even find
      * the HtmlHelp() API function.
      */
-    HINSTANCE dllHH = load_system32_dll("hhctrl.ocx");
+    dllHH = load_system32_dll("hhctrl.ocx");
     GET_WINDOWS_FUNCTION(dllHH, HtmlHelpA);
     if (!p_HtmlHelpA) {
         FreeLibrary(dllHH);

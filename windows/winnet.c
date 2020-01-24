@@ -1381,8 +1381,9 @@ void try_send(NetSocket *s)
             len = s->sending_oob;
             data = &s->oobdata;
         } else {
+            ptrlen bufdata;
             urgentflag = 0;
-            ptrlen bufdata = bufchain_prefix(&s->output_data);
+            bufdata = bufchain_prefix(&s->output_data);
             data = bufdata.ptr;
             len = bufdata.len;
         }

@@ -187,8 +187,9 @@ Channel *agentf_new(SshChannel *c)
 
 static void agentf_free(Channel *chan)
 {
+    agentf *af;
     assert(chan->vt == &agentf_channelvt);
-    agentf *af = container_of(chan, agentf, chan);
+    af = container_of(chan, agentf, chan);
 
     if (af->pending)
         agent_cancel_query(af->pending);
@@ -199,8 +200,9 @@ static void agentf_free(Channel *chan)
 static size_t agentf_send(Channel *chan, bool is_stderr,
                           const void *data, size_t length)
 {
+    agentf *af;
     assert(chan->vt == &agentf_channelvt);
-    agentf *af = container_of(chan, agentf, chan);
+    af = container_of(chan, agentf, chan);
     bufchain_add(&af->inbuffer, data, length);
     agentf_try_forward(af);
 
@@ -217,8 +219,9 @@ static size_t agentf_send(Channel *chan, bool is_stderr,
 
 static void agentf_send_eof(Channel *chan)
 {
+    agentf *af;
     assert(chan->vt == &agentf_channelvt);
-    agentf *af = container_of(chan, agentf, chan);
+    af = container_of(chan, agentf, chan);
 
     af->rcvd_eof = true;
 
@@ -235,8 +238,9 @@ static char *agentf_log_close_msg(Channel *chan)
 
 static void agentf_set_input_wanted(Channel *chan, bool wanted)
 {
+    agentf *af;
     assert(chan->vt == &agentf_channelvt);
-    agentf *af = container_of(chan, agentf, chan);
+    af = container_of(chan, agentf, chan);
 
     af->input_wanted = wanted;
 

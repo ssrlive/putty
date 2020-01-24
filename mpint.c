@@ -51,9 +51,10 @@ mp_int *mp_new(size_t maxbits)
 
 mp_int *mp_from_integer(uintmax_t n)
 {
+    size_t i;
     mp_int *x = mp_make_sized(
         (sizeof(n) + BIGNUM_INT_BYTES - 1) / BIGNUM_INT_BYTES);
-    for (size_t i = 0; i < x->nw; i++)
+    for (i = 0; i < x->nw; i++)
         x->w[i] = n >> (i * BIGNUM_INT_BITS);
     return x;
 }
@@ -77,8 +78,9 @@ void mp_free(mp_int *x)
 
 void mp_dump(FILE *fp, const char *prefix, mp_int *x, const char *suffix)
 {
+    size_t i;
     fprintf(fp, "%s0x", prefix);
-    for (size_t i = mp_max_bytes(x); i-- > 0 ;)
+    for (i = mp_max_bytes(x); i-- > 0 ;)
         fprintf(fp, "%02X", mp_get_byte(x, i));
     fputs(suffix, fp);
 }
@@ -105,8 +107,9 @@ void mp_copy_into(mp_int *dest, mp_int *src)
 void mp_select_into(mp_int *dest, mp_int *src0, mp_int *src1,
                     unsigned which)
 {
+    size_t i;
     BignumInt mask = -(BignumInt)(1 & which);
-    for (size_t i = 0; i < dest->nw; i++) {
+    for (i = 0; i < dest->nw; i++) {
         BignumInt srcword0 = mp_word(src0, i), srcword1 = mp_word(src1, i);
         dest->w[i] = srcword0 ^ ((srcword1 ^ srcword0) & mask);
     }
@@ -114,9 +117,11 @@ void mp_select_into(mp_int *dest, mp_int *src0, mp_int *src1,
 
 void mp_cond_swap(mp_int *x0, mp_int *x1, unsigned swap)
 {
+    volatile BignumInt mask;
+    size_t i;
     assert(x0->nw == x1->nw);
-    volatile BignumInt mask = -(BignumInt)(1 & swap);
-    for (size_t i = 0; i < x0->nw; i++) {
+    mask = -(BignumInt)(1 & swap);
+    for (i = 0; i < x0->nw; i++) {
         BignumInt diff = (x0->w[i] ^ x1->w[i]) & mask;
         x0->w[i] ^= diff;
         x1->w[i] ^= diff;
@@ -130,8 +135,9 @@ void mp_clear(mp_int *x)
 
 void mp_cond_clear(mp_int *x, unsigned clear)
 {
+    size_t i;
     BignumInt mask = ~-(BignumInt)(1 & clear);
-    for (size_t i = 0; i < x->nw; i++)
+    for (i = 0; i < x->nw; i++)
         x->w[i] &= mask;
 }
 
@@ -141,10 +147,13 @@ void mp_cond_clear(mp_int *x, unsigned clear)
  */
 static mp_int *mp_from_bytes_int(ptrlen bytes, size_t m, size_t c)
 {
+    mp_int *n;
+    size_t i;
+
     size_t nw = (bytes.len + BIGNUM_INT_BYTES - 1) / BIGNUM_INT_BYTES;
     nw = size_t_max(nw, 1);
-    mp_int *n = mp_make_sized(nw);
-    for (size_t i = 0; i < bytes.len; i++)
+    n = mp_make_sized(nw);
+    for (i = 0; i < bytes.len; i++)
         n->w[i / BIGNUM_INT_BYTES] |=
             (BignumInt)(((const unsigned char *)bytes.ptr)[m*i+c]) <<
             (8 * (i % BIGNUM_INT_BYTES));
@@ -175,18 +184,21 @@ static mp_int *mp_from_words(size_t nw, const BignumInt *w)
  */
 mp_int *mp_from_decimal_pl(ptrlen decimal)
 {
+    size_t bits, words, i;
+    mp_int *x;
+
     /* 196/59 is an upper bound (and also a continued-fraction
      * convergent) for log2(10), so this conservatively estimates the
      * number of bits that will be needed to store any number that can
      * be written in this many decimal digits. */
     assert(decimal.len < (~(size_t)0) / 196);
-    size_t bits = 196 * decimal.len / 59;
+    bits = 196 * decimal.len / 59;
 
     /* Now round that up to words. */
-    size_t words = bits / BIGNUM_INT_BITS + 1;
+    words = bits / BIGNUM_INT_BITS + 1;
 
-    mp_int *x = mp_make_sized(words);
-    for (size_t i = 0; i < decimal.len; i++) {
+    x = mp_make_sized(words);
+    for (i = 0; i < decimal.len; i++) {
         mp_add_integer_into(x, x, ((char *)decimal.ptr)[i] - '0');
 
         if (i+1 == decimal.len)
@@ -210,12 +222,17 @@ mp_int *mp_from_decimal(const char *decimal)
  */
 mp_int *mp_from_hex_pl(ptrlen hex)
 {
+    size_t bits, words, nibble;
+    mp_int *x;
+
     assert(hex.len <= (~(size_t)0) / 4);
-    size_t bits = hex.len * 4;
-    size_t words = (bits + BIGNUM_INT_BITS - 1) / BIGNUM_INT_BITS;
+    bits = hex.len * 4;
+    words = (bits + BIGNUM_INT_BITS - 1) / BIGNUM_INT_BITS;
     words = size_t_max(words, 1);
-    mp_int *x = mp_make_sized(words);
-    for (size_t nibble = 0; nibble < hex.len; nibble++) {
+    x = mp_make_sized(words);
+    for (nibble = 0; nibble < hex.len; nibble++) {
+        size_t word_idx, nibble_within_word;
+
         BignumInt digit = ((char *)hex.ptr)[hex.len-1 - nibble];
 
         BignumInt lmask = ~-((BignumInt)((digit-'a')|('f'-digit))
@@ -228,8 +245,8 @@ mp_int *mp_from_hex_pl(ptrlen hex)
         digitval ^= (digitval ^ (digit - 'A' + 10)) & umask;
         digitval &= 0xF; /* at least be _slightly_ nice about weird input */
 
-        size_t word_idx = nibble / (BIGNUM_INT_BYTES*2);
-        size_t nibble_within_word = nibble % (BIGNUM_INT_BYTES*2);
+        word_idx = nibble / (BIGNUM_INT_BYTES*2);
+        nibble_within_word = nibble % (BIGNUM_INT_BYTES*2);
         x->w[word_idx] |= digitval << (nibble_within_word * 4);
     }
     return x;
@@ -259,8 +276,9 @@ unsigned mp_get_bit(mp_int *x, size_t bit)
 
 uintmax_t mp_get_integer(mp_int *x)
 {
+    size_t i;
     uintmax_t toret = 0;
-    for (size_t i = x->nw; i-- > 0 ;) {
+    for (i = x->nw; i-- > 0 ;) {
         /* Shift in two stages to avoid undefined behaviour if the
          * shift count equals the integer width */
         toret = (toret << (BIGNUM_INT_BITS/2)) << (BIGNUM_INT_BITS/2);
@@ -271,10 +289,11 @@ uintmax_t mp_get_integer(mp_int *x)
 
 void mp_set_bit(mp_int *x, size_t bit, unsigned val)
 {
+    unsigned shift;
     size_t word = bit / BIGNUM_INT_BITS;
     assert(word < x->nw);
 
-    unsigned shift = (bit % BIGNUM_INT_BITS);
+    shift = (bit % BIGNUM_INT_BITS);
 
     x->w[word] &= ~((BignumInt)1 << shift);
     x->w[word] |= (BignumInt)(val & 1) << shift;
@@ -311,9 +330,11 @@ static inline void mp_find_highest_nonzero_word_pair(
     mp_int *x, size_t shift_wanted, size_t *index,
     uint64_t *hi, uint64_t *lo)
 {
+    size_t curr_index;
+
     uint64_t curr_hi = 0, curr_lo = 0;
 
-    for (size_t curr_index = 0; curr_index < x->nw; curr_index++) {
+    for (curr_index = 0; curr_index < x->nw; curr_index++) {
         BignumInt curr_word = x->w[curr_index];
         unsigned indicator = normalise_to_1(curr_word);
 
@@ -330,6 +351,9 @@ static inline void mp_find_highest_nonzero_word_pair(
 
 size_t mp_get_nbits(mp_int *x)
 {
+    BignumInt hiword, hibit_index;
+    size_t i;
+
     /* Sentinel values in case there are no bits set at all: we
      * imagine that there's a word at position -1 (i.e. the topmost
      * fraction word) which is all 1s, because that way, we handle a
@@ -343,13 +367,13 @@ size_t mp_get_nbits(mp_int *x)
      * Find the highest nonzero word and its index.
      */
     mp_find_highest_nonzero_word_pair(x, 0, &hiword_index, &hiword64, NULL);
-    BignumInt hiword = hiword64; /* in case BignumInt is a narrower type */
+    hiword = hiword64; /* in case BignumInt is a narrower type */
 
     /*
      * Find the index of the highest set bit within hiword.
      */
-    BignumInt hibit_index = 0;
-    for (size_t i = (1 << (BIGNUM_INT_BITS_BITS-1)); i != 0; i >>= 1) {
+    hibit_index = 0;
+    for (i = (1 << (BIGNUM_INT_BITS_BITS-1)); i != 0; i >>= 1) {
         BignumInt shifted_word = hiword >> i;
         BignumInt indicator =
             (BignumInt)(-shifted_word) >> (BIGNUM_INT_BITS-1);
@@ -373,6 +397,9 @@ size_t mp_get_nbits(mp_int *x)
  */
 static void trim_leading_zeroes(char *buf, size_t bufsize, size_t maxtrim)
 {
+    uint8_t *ubuf;
+    size_t logd;
+
     size_t trim = maxtrim;
 
     /*
@@ -380,7 +407,8 @@ static void trim_leading_zeroes(char *buf, size_t bufsize, size_t maxtrim)
      * shift count.
      */
     if (trim > 0) {
-        for (size_t pos = trim; pos-- > 0 ;) {
+        size_t pos;
+        for (pos = trim; pos-- > 0 ;) {
             uint8_t diff = buf[pos] ^ '0';
             size_t mask = -((((size_t)diff) - 1) >> (SIZE_T_BITS - 1));
             trim ^= (trim ^ pos) & ~mask;
@@ -392,11 +420,12 @@ static void trim_leading_zeroes(char *buf, size_t bufsize, size_t maxtrim)
      * conditional shift by 2^i bytes if bit i is set in the shift
      * count.
      */
-    uint8_t *ubuf = (uint8_t *)buf;
-    for (size_t logd = 0; bufsize >> logd; logd++) {
+    ubuf = (uint8_t *)buf;
+    for (logd = 0; bufsize >> logd; logd++) {
         uint8_t mask = -(uint8_t)((trim >> logd) & 1);
         size_t d = (size_t)1 << logd;
-        for (size_t i = 0; i+d < bufsize; i++) {
+        size_t i;
+        for (i = 0; i+d < bufsize; i++) {
             uint8_t diff = mask & (ubuf[i] ^ ubuf[i+d]);
             ubuf[i] ^= diff;
             ubuf[i+d] ^= diff;
@@ -413,6 +442,8 @@ static void trim_leading_zeroes(char *buf, size_t bufsize, size_t maxtrim)
  */
 char *mp_get_decimal(mp_int *x_orig)
 {
+    size_t i, bufsize, pos;
+    char *outbuf;
     mp_int *x = mp_copy(x_orig), *y = mp_make_sized(x->nw);
 
     /*
@@ -422,7 +453,7 @@ char *mp_get_decimal(mp_int *x_orig)
      */
     mp_int *inv5 = mp_make_sized(x->nw);
     assert(BIGNUM_INT_BITS % 8 == 0);
-    for (size_t i = 0; i < inv5->nw; i++)
+    for (i = 0; i < inv5->nw; i++)
         inv5->w[i] = BIGNUM_INT_MASK / 5 * 4;
     inv5->w[0]++;
 
@@ -433,8 +464,8 @@ char *mp_get_decimal(mp_int *x_orig)
      * in this many binary bits.
      */
     assert(x->nw < (~(size_t)1) / (146 * BIGNUM_INT_BITS));
-    size_t bufsize = size_t_max(x->nw * (146 * BIGNUM_INT_BITS) / 485, 1) + 2;
-    char *outbuf = snewn(bufsize, char);
+    bufsize = size_t_max(x->nw * (146 * BIGNUM_INT_BITS) / 485, 1) + 2;
+    outbuf = snewn(bufsize, char);
     outbuf[bufsize - 1] = '\0';
 
     /*
@@ -442,7 +473,7 @@ char *mp_get_decimal(mp_int *x_orig)
      * significant upwards, so that we write to outbuf in reverse
      * order.
      */
-    for (size_t pos = bufsize - 1; pos-- > 0 ;) {
+    for (pos = bufsize - 1; pos-- > 0 ;) {
         /*
          * Find the current residue mod 10. We do this by first
          * summing the bytes of the number, with all but the lowest
@@ -454,8 +485,10 @@ char *mp_get_decimal(mp_int *x_orig)
          * input-dependent timing.
          */
         uint32_t low_digit = 0, maxval = 0, mult = 1;
-        for (size_t i = 0; i < x->nw; i++) {
-            for (unsigned j = 0; j < BIGNUM_INT_BYTES; j++) {
+        size_t i;
+        for (i = 0; i < x->nw; i++) {
+            unsigned j;
+            for (j = 0; j < BIGNUM_INT_BYTES; j++) {
                 low_digit += mult * (0xFF & (x->w[i] >> (8*j)));
                 maxval += mult * 0xFF;
                 mult = 6;
@@ -512,12 +545,13 @@ char *mp_get_decimal(mp_int *x_orig)
  */
 static char *mp_get_hex_internal(mp_int *x, uint8_t letter_offset)
 {
+    size_t nibble;
     size_t nibbles = x->nw * BIGNUM_INT_BYTES * 2;
     size_t bufsize = nibbles + 1;
     char *outbuf = snewn(bufsize, char);
     outbuf[nibbles] = '\0';
 
-    for (size_t nibble = 0; nibble < nibbles; nibble++) {
+    for (nibble = 0; nibble < nibbles; nibble++) {
         size_t word_idx = nibble / (BIGNUM_INT_BYTES*2);
         size_t nibble_within_word = nibble % (BIGNUM_INT_BYTES*2);
         uint8_t digitval = 0xF & (x->w[word_idx] >> (nibble_within_word * 4));
@@ -551,21 +585,23 @@ char *mp_get_hex_uppercase(mp_int *x)
  */
 void BinarySink_put_mp_ssh1(BinarySink *bs, mp_int *x)
 {
+    size_t i;
     size_t bits = mp_get_nbits(x);
     size_t bytes = (bits + 7) / 8;
 
     assert(bits < 0x10000);
     put_uint16(bs, bits);
-    for (size_t i = bytes; i-- > 0 ;)
+    for (i = bytes; i-- > 0 ;)
         put_byte(bs, mp_get_byte(x, i));
 }
 
 void BinarySink_put_mp_ssh2(BinarySink *bs, mp_int *x)
 {
+    size_t i;
     size_t bytes = (mp_get_nbits(x) + 8) / 8;
 
     put_uint32(bs, bytes);
-    for (size_t i = bytes; i-- > 0 ;)
+    for (i = bytes; i-- > 0 ;)
         put_byte(bs, mp_get_byte(x, i));
 }
 
@@ -619,6 +655,7 @@ mp_int *BinarySource_get_mp_ssh2(BinarySource *src)
  */
 static mp_int mp_make_alias(mp_int *in, size_t offset, size_t len)
 {
+    mp_int toret;
     /*
      * Bounds-check the offset and length so that we always return
      * something valid, even if it's not necessarily the length the
@@ -629,7 +666,6 @@ static mp_int mp_make_alias(mp_int *in, size_t offset, size_t len)
     if (len > in->nw - offset)
         len = in->nw - offset;
 
-    mp_int toret;
     toret.nw = len;
     toret.w = in->w + offset;
     return toret;
@@ -651,8 +687,9 @@ static mp_int mp_make_alias(mp_int *in, size_t offset, size_t len)
  */
 static mp_int mp_alloc_from_scratch(mp_int *pool, size_t len)
 {
+    mp_int toret;
     assert(len <= pool->nw);
-    mp_int toret = mp_make_alias(pool, 0, len);
+    toret = mp_make_alias(pool, 0, len);
     *pool = mp_make_alias(pool, len, pool->nw);
     return toret;
 }
@@ -676,7 +713,8 @@ static BignumCarry mp_add_masked_into(
     BignumInt *w_out, size_t rw, mp_int *a, mp_int *b,
     BignumInt b_and, BignumInt b_xor, BignumCarry carry)
 {
-    for (size_t i = 0; i < rw; i++) {
+    size_t i;
+    for (i = 0; i < rw; i++) {
         BignumInt aword = mp_word(a, i), bword = mp_word(b, i), out;
         bword = (bword & b_and) ^ b_xor;
         BignumADC(out, carry, aword, bword, carry);
@@ -706,7 +744,8 @@ void mp_sub_into(mp_int *r, mp_int *a, mp_int *b)
 
 void mp_and_into(mp_int *r, mp_int *a, mp_int *b)
 {
-    for (size_t i = 0; i < r->nw; i++) {
+    size_t i;
+    for (i = 0; i < r->nw; i++) {
         BignumInt aword = mp_word(a, i), bword = mp_word(b, i);
         r->w[i] = aword & bword;
     }
@@ -714,7 +753,8 @@ void mp_and_into(mp_int *r, mp_int *a, mp_int *b)
 
 void mp_or_into(mp_int *r, mp_int *a, mp_int *b)
 {
-    for (size_t i = 0; i < r->nw; i++) {
+    size_t i;
+    for (i = 0; i < r->nw; i++) {
         BignumInt aword = mp_word(a, i), bword = mp_word(b, i);
         r->w[i] = aword | bword;
     }
@@ -722,7 +762,8 @@ void mp_or_into(mp_int *r, mp_int *a, mp_int *b)
 
 void mp_xor_into(mp_int *r, mp_int *a, mp_int *b)
 {
-    for (size_t i = 0; i < r->nw; i++) {
+    size_t i;
+    for (i = 0; i < r->nw; i++) {
         BignumInt aword = mp_word(a, i), bword = mp_word(b, i);
         r->w[i] = aword ^ bword;
     }
@@ -730,7 +771,8 @@ void mp_xor_into(mp_int *r, mp_int *a, mp_int *b)
 
 void mp_bic_into(mp_int *r, mp_int *a, mp_int *b)
 {
-    for (size_t i = 0; i < r->nw; i++) {
+    size_t i;
+    for (i = 0; i < r->nw; i++) {
         BignumInt aword = mp_word(a, i), bword = mp_word(b, i);
         r->w[i] = aword & ~bword;
     }
@@ -738,9 +780,10 @@ void mp_bic_into(mp_int *r, mp_int *a, mp_int *b)
 
 static void mp_cond_negate(mp_int *r, mp_int *x, unsigned yes)
 {
+    size_t i;
     BignumCarry carry = yes;
     BignumInt flip = -(BignumInt)yes;
-    for (size_t i = 0; i < r->nw; i++) {
+    for (i = 0; i < r->nw; i++) {
         BignumInt xword = mp_word(x, i);
         xword ^= flip;
         BignumADC(r->w[i], carry, 0, xword, carry);
@@ -755,7 +798,8 @@ static BignumCarry mp_add_masked_integer_into(
     BignumInt *w_out, size_t rw, mp_int *a, uintmax_t b,
     BignumInt b_and, BignumInt b_xor, BignumCarry carry)
 {
-    for (size_t i = 0; i < rw; i++) {
+    size_t i;
+    for (i = 0; i < rw; i++) {
         BignumInt aword = mp_word(a, i);
         size_t shift = i * BIGNUM_INT_BITS;
         BignumInt bword = shift < BIGNUM_INT_BYTES ? b >> shift : 0;
@@ -786,10 +830,13 @@ void mp_sub_integer_into(mp_int *r, mp_int *a, uintmax_t n)
 static void mp_add_integer_into_shifted_by_words(
     mp_int *r, mp_int *a, uintmax_t n, size_t word_index)
 {
+    size_t i;
     unsigned indicator = 0;
     BignumCarry carry = 0;
 
-    for (size_t i = 0; i < r->nw; i++) {
+    for (i = 0; i < r->nw; i++) {
+        BignumInt bword, aword, out;
+        uintmax_t new_n;
         /* indicator becomes 1 when we reach the index that the least
          * significant bits of n want to be placed at, and it stays 1
          * thereafter. */
@@ -798,12 +845,11 @@ static void mp_add_integer_into_shifted_by_words(
         /* If indicator is 1, we add the low bits of n into r, and
          * shift n down. If it's 0, we add zero bits into r, and
          * leave n alone. */
-        BignumInt bword = n & -(BignumInt)indicator;
-        uintmax_t new_n = (BIGNUM_INT_BITS < 64 ? n >> BIGNUM_INT_BITS : 0);
+        bword = n & -(BignumInt)indicator;
+        new_n = (BIGNUM_INT_BITS < 64 ? n >> BIGNUM_INT_BITS : 0);
         n ^= (n ^ new_n) & -(uintmax_t)indicator;
 
-        BignumInt aword = mp_word(a, i);
-        BignumInt out;
+        aword = mp_word(a, i);
         BignumADC(out, carry, aword, bword, carry);
         r->w[i] = out;
     }
@@ -811,8 +857,9 @@ static void mp_add_integer_into_shifted_by_words(
 
 void mp_mul_integer_into(mp_int *r, mp_int *a, uint16_t n)
 {
+    size_t i;
     BignumInt carry = 0, mult = n;
-    for (size_t i = 0; i < r->nw; i++) {
+    for (i = 0; i < r->nw; i++) {
         BignumInt aword = mp_word(a, i);
         BignumMULADD(carry, r->w[i], aword, mult, carry);
     }
@@ -843,8 +890,9 @@ unsigned mp_cmp_hs(mp_int *a, mp_int *b)
 
 unsigned mp_hs_integer(mp_int *x, uintmax_t n)
 {
+    size_t i;
     BignumInt carry = 1;
-    for (size_t i = 0; i < x->nw; i++) {
+    for (i = 0; i < x->nw; i++) {
         size_t shift = i * BIGNUM_INT_BITS;
         BignumInt nword = shift < CHAR_BIT*sizeof(n) ? n >> shift : 0;
         BignumInt dummy_out;
@@ -861,16 +909,18 @@ unsigned mp_hs_integer(mp_int *x, uintmax_t n)
  */
 unsigned mp_cmp_eq(mp_int *a, mp_int *b)
 {
+    size_t i, limit;
     BignumInt diff = 0;
-    for (size_t i = 0, limit = size_t_max(a->nw, b->nw); i < limit; i++)
+    for (i = 0, limit = size_t_max(a->nw, b->nw); i < limit; i++)
         diff |= mp_word(a, i) ^ mp_word(b, i);
     return 1 ^ normalise_to_1(diff);   /* return 1 if diff _is_ zero */
 }
 
 unsigned mp_eq_integer(mp_int *x, uintmax_t n)
 {
+    size_t i;
     BignumInt diff = 0;
-    for (size_t i = 0; i < x->nw; i++) {
+    for (i = 0; i < x->nw; i++) {
         size_t shift = i * BIGNUM_INT_BITS;
         BignumInt nword = shift < CHAR_BIT*sizeof(n) ? n >> shift : 0;
         diff |= x->w[i] ^ nword;
@@ -912,14 +962,15 @@ mp_int *mp_neg(mp_int *a)
  */
 static void mp_mul_add_simple(mp_int *r, mp_int *a, mp_int *b)
 {
+    BignumInt *ap, *rp;
     BignumInt *aend = a->w + a->nw, *bend = b->w + b->nw, *rend = r->w + r->nw;
 
-    for (BignumInt *ap = a->w, *rp = r->w;
+    for (ap = a->w, rp = r->w;
          ap < aend && rp < rend; ap++, rp++) {
 
-        BignumInt adata = *ap, carry = 0, *rq = rp;
+        BignumInt adata = *ap, carry = 0, *rq = rp, *bp;
 
-        for (BignumInt *bp = b->w; bp < bend && rq < rend; bp++, rq++) {
+        for (bp = b->w; bp < bend && rq < rend; bp++, rq++) {
             BignumInt bdata = bp < bend ? *bp : 0;
             BignumMULADD2(carry, *rq, adata, bdata, *rq, carry);
         }

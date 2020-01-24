@@ -436,6 +436,7 @@ char *registry_get_string(HKEY root, const char *path, const char *leaf)
     HKEY key = root;
     bool need_close_key = false;
     char *toret = NULL, *str = NULL;
+    DWORD type, size, size_got;
 
     if (path) {
         if (RegCreateKey(key, path, &key) != ERROR_SUCCESS)
@@ -443,14 +444,13 @@ char *registry_get_string(HKEY root, const char *path, const char *leaf)
         need_close_key = true;
     }
 
-    DWORD type, size;
     if (RegQueryValueEx(key, leaf, 0, &type, NULL, &size) != ERROR_SUCCESS)
         goto out;
     if (type != REG_SZ)
         goto out;
 
     str = snewn(size + 1, char);
-    DWORD size_got = size;
+    size_got = size;
     if (RegQueryValueEx(key, leaf, 0, &type, (LPBYTE)str,
                         &size_got) != ERROR_SUCCESS)
         goto out;

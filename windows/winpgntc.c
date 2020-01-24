@@ -190,11 +190,12 @@ static int named_pipe_agent_accumulate_response(
 {
     put_data(sb, data, len);
     if (sb->len >= 4) {
+        int overall_length;
         uint32_t length_field = GET_32BIT_MSB_FIRST(sb->u);
         if (length_field > AGENT_MAX_MSGLEN)
             return -1; /* badly formatted message */
 
-        int overall_length = length_field + 4;
+        overall_length = length_field + 4;
         if (sb->len >= overall_length)
             return overall_length;
     }
@@ -205,6 +206,7 @@ static int named_pipe_agent_accumulate_response(
 static size_t named_pipe_agent_gotdata(
     struct handle *h, const void *data, size_t len, int err)
 {
+    int status;
     agent_pending_query *pq = handle_get_privdata(h);
 
     if (err || len == 0) {
@@ -212,7 +214,7 @@ static size_t named_pipe_agent_gotdata(
         agent_cancel_query(pq);
     }
 
-    int status = named_pipe_agent_accumulate_response(pq->response, data, len);
+    status = named_pipe_agent_accumulate_response(pq->response, data, len);
     if (status == -1) {
         pq->callback(pq->callback_ctx, NULL, 0);
         agent_cancel_query(pq);
@@ -233,6 +235,7 @@ agent_pending_query *named_pipe_agent_query(
     char *err = NULL, *pipename = NULL;
     strbuf *sb = NULL;
     HANDLE pipehandle;
+    DWORD done;
 
     pipename = agent_named_pipe_name();
     pipehandle = connect_to_named_pipe(pipename, &err);
@@ -241,7 +244,7 @@ agent_pending_query *named_pipe_agent_query(
 
     strbuf_finalise_agent_query(query);
 
-    for (DWORD done = 0; done < query->len ;) {
+    for (done = 0; done < query->len ;) {
         DWORD nwritten;
         bool ret = WriteFile(pipehandle, query->s + done, query->len - done,
                              &nwritten, NULL);

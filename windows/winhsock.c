@@ -159,6 +159,7 @@ static void sk_handle_write_eof(Socket *s)
 static void handle_socket_unfreeze(void *hsv)
 {
     HandleSocket *hs = (HandleSocket *)hsv;
+    ptrlen data;
 
     /*
      * If we've been put into a state other than THAWING since the
@@ -170,7 +171,7 @@ static void handle_socket_unfreeze(void *hsv)
     /*
      * Get some of the data we've buffered.
      */
-    ptrlen data = bufchain_prefix(&hs->inputdata);
+    data = bufchain_prefix(&hs->inputdata);
     assert(data.len > 0);
 
     /*
