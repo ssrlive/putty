@@ -1,4 +1,9 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 3.15)
+
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+
 project(putty LANGUAGES C)
 
 include(cmake/setup.cmake)
@@ -8,6 +13,11 @@ include(cmake/setup.cmake)
 add_subdirectory(doc)
 
 add_compile_definitions(HAVE_CMAKE_H)
+
+if (MSVC)
+add_compile_definitions(inline=__inline _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE _CRT_SECURE_NO_DEPRECATE _SCL_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 include_directories(terminal)
 
